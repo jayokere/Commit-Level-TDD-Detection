@@ -5,7 +5,7 @@ from multiprocessing.pool import ThreadPool
 
 # Define a class to fetch data from the Apache Foundation's projects JSON API and extract GitHub links.
 class Apache_web_miner:
-    def __init__(self, target_url: str, num_threads: int = 55):
+    def __init__(self, target_url: str, num_threads: int = 150):
         self.url = target_url
         self.data = {}
         self.num_threads = num_threads
