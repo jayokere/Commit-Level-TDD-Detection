@@ -10,3 +10,6 @@ venv/
 
 # OS Metadata
 .DS_Store
+
+# Generated data files
+data/
