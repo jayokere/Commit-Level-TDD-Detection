@@ -1,11 +1,14 @@
 import requests
+
 from typing import List, Optional, Dict
+from multiprocessing.pool import ThreadPool
 
 # Define a class to fetch data from the Apache Foundation's projects JSON API and extract GitHub links.
 class Apache_web_miner:
-    def __init__(self, target_url: str):
+    def __init__(self, target_url: str, num_threads: int = 150):
         self.url = target_url
         self.data = {}
+        self.num_threads = num_threads
     
     # Fetch data from the specified URL and store it in the 'data' attribute.
     def fetch_data(self):
@@ -35,24 +38,41 @@ class Apache_web_miner:
         return None
     
     # Extract GitHub links from the fetched data and store them in a dictionary.
-    def get_github_links(self):
+    def get_github_links(self) -> Dict[str, List[str]]:
         clean_list = {}
+
+        # Search through all repository links to find non-GitHub links
+        links_to_check = []
+        for details in self.data.values():
+            if 'repository' in details:
+                for link in details['repository']:
+                    # Only add strings that dont contain 'github.com'
+                    if isinstance(link, str) and 'github.com' not in link:
+                        links_to_check.append(link)
+
+        # Use multithreading to resolve redirects for all collected links
+        print(f"Resolving {len(links_to_check)} links using {self.num_threads} threads...")
+        with ThreadPool(self.num_threads) as pool:
+            # pool.map runs resolve_redirect on every link in the list simultaneously
+            results = pool.map(self.resolve_redirect, links_to_check)
+        
+        # Create a "Lookup Table" (Dictionary) for resolved links.
+        resolved_cache = dict(zip(links_to_check, results))
 
         for project_id, details in self.data.items():
             if 'repository' in details:
                 repos = details['repository']
                 github_links: List[str] = []
 
+                # Check if the link is already in the resolved_cache and add it if not.
                 for link in repos:
                     if not isinstance(link, str): continue
 
                     if 'github.com' in link and link not in github_links:
                         github_links.append(link)
                     else:
-                        resolved_link = self.resolve_redirect(link)
-                        if resolved_link:
-                            # Avoid duplicates if the resolved link is already in the list
-                            if resolved_link not in github_links:
+                        resolved_link = resolved_cache.get(link)
+                        if resolved_link and resolved_link not in github_links:
                                 github_links.append(resolved_link)
 
                 if len(github_links) > 0:
