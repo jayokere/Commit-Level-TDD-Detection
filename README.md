@@ -8,14 +8,14 @@ Currently, this application connects to the Apache Software Foundation's public 
 
 ```text
 .
-├── apache_miner.py           # The "Tool": Class responsible for fetching and parsing API data
+├── apache_web_miner.py           # The "Tool": Class responsible for fetching and parsing API data
 ├── main.py                   # The "Workflow": Entry point that manages logic and file persistence
 ├── requirements.txt          # List of Python dependencies
 ├── .gitignore                # Specifies files to be ignored by Git (e.g., data/, __pycache__/)
 ├── tests/                    # Unit tests folder
 │   ├── __init__.py
-│   ├── test_apache_miner.py  # Tests for the mining class
-│   └── test_main.py          # Tests for the workflow logic
+│   ├── apache_web_miner_test.py  # Tests for the mining class
+│   └── main_test.py          # Tests for the workflow logic
 └── data/                     # Output folder (Generated automatically)
     └── apache_projects.json  # The resulting dataset
 
@@ -69,7 +69,8 @@ python -m unittest discover tests -p "*_test.py"
 ## 🗺 Roadmap
 
 - [x] **Phase 1:** Mine Apache Project Feed for GitHub links.
-- [ ] **Phase 2:** Implement TDD detection logic (scanning commit history).
-- [ ] **Phase 3:** Generate reports on TDD adoption rates across Apache projects.
+- [ ] **Phase 3:** Mine Github Links for commits
+- [ ] **Phase 3:** Implement TDD detection logic (scanning commit history).
+- [ ] **Phase 4:** Generate reports on TDD adoption rates across Apache projects.
 
 ## 📄 License
