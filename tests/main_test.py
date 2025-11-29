@@ -3,7 +3,7 @@ from unittest.mock import patch, mock_open, MagicMock
 import json
 
 # We import the functions we want to test from main
-from main import get_project_data, DATA_FILE
+from main import fetch_project_data, DATA_FILE
 
 class TestMainWorkflow(unittest.TestCase):
 
@@ -17,7 +17,7 @@ class TestMainWorkflow(unittest.TestCase):
         mock_exists.return_value = True 
 
         # 2. EXECUTE
-        result = get_project_data()
+        result = fetch_project_data()
 
         # 3. ASSERTIONS
         # The result should come from the 'read_data' in our mock_open above
@@ -45,7 +45,7 @@ class TestMainWorkflow(unittest.TestCase):
         mock_miner_instance.get_github_links.return_value = fake_data
 
         # 2. EXECUTE
-        result = get_project_data()
+        result = fetch_project_data()
 
         # 3. ASSERTIONS
         # The result should come from the miner
