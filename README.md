@@ -34,8 +34,19 @@ Currently, this application connects to the Apache Software Foundation's public 
     cd <your-project-folder>
     ```
 
-2.  **Install dependencies:**
-    It is recommended to run this inside a virtual environment.
+2.  **Setup Virtual Environment** (recommended):
+    ```bash
+    # MacOS / Linux
+    python3 -m venv venv
+    source venv/bin/activate
+
+    # Windows
+    python -m venv venv
+    venv\Scripts\activate   # command prompt
+    venv\Scripts\Activate.ps1 # PowerShell
+    ```
+
+3.  **Install dependencies:**
     ```bash
     pip install -r requirements.txt
     ```
