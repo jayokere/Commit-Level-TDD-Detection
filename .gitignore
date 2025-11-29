@@ -1,0 +1,11 @@
+# Bytecode Files
+__pycache__/
+*.pyc
+
+# Virtual Environments
+.env
+venv/
+.env/
+
+# OS Metadata
+.DS_Store
