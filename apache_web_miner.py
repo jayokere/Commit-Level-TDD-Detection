@@ -1,7 +1,12 @@
-import requests
-
+# Import necessary libraries
+import requests, os, json
+from utils import measure_time
 from typing import List, Optional, Dict
 from multiprocessing.pool import ThreadPool
+
+# Constants
+DATA_FILE: str = 'data/apache_projects.json'
+APACHE_URL: str = "https://projects.apache.org/json/foundation/projects.json"
 
 # Define a class to fetch data from the Apache Foundation's projects JSON API and extract GitHub links.
 class Apache_web_miner:
@@ -80,11 +85,33 @@ class Apache_web_miner:
                     clean_list[name] = github_links
 
         return clean_list
+    
+# Function to fetch project data either from a local file or by mining from Apache
+@measure_time 
+def fetch_project_data() -> Dict[str, List[str]]:
+    # Load data from local file if it exists. Otherwise, fetch data from Apache.
+    if os.path.exists(DATA_FILE):
+        print(f"Loading data from local file: {DATA_FILE}...")
+        with open(DATA_FILE, 'r') as f:
+            data: Dict[str, List[str]] = json.load(f)
+            return data
+    else:
+        print("Local file not found. Mining data from Apache...")
+        
+        # Fetch data from Apache's projects JSON API and extract GitHub links.
+        miner = Apache_web_miner(APACHE_URL)
+        miner.fetch_data()
+        links: Dict[str, List[str]] = miner.get_github_links()
+
+        # Save the fetched data to a local file for future use.
+        print(f"Saving new data to {DATA_FILE}...")
+        folder_path = os.path.dirname(DATA_FILE)
+        if folder_path: 
+            os.makedirs(folder_path, exist_ok=True)
+        with open(DATA_FILE, "w") as f:
+            json.dump(links, f, indent=4)
+            
+        return links
 
 if __name__ == "__main__":
-    apache_url = "https://projects.apache.org/json/foundation/projects.json"
-    my_miner = Apache_web_miner(apache_url)
-    my_miner.fetch_data()
-    print("Mining links (this might take a while)...")
-    results = my_miner.get_github_links()
-    print(f"Done. Found {len(results)} projects.")
+    fetch_project_data()
