@@ -1,6 +1,7 @@
 # Bytecode Files
 __pycache__/
 *.pyc
+.pytest_cache/
 
 # Virtual Environments
 .env
