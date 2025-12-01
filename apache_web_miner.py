@@ -1,5 +1,5 @@
 # Import necessary libraries
-import requests, os, json
+import requests, os, json, miner_intro
 from utils import measure_time
 from typing import List, Optional, Dict
 from multiprocessing.pool import ThreadPool
@@ -22,15 +22,13 @@ class Apache_web_miner:
             self.data = response.json()
             print(f"Data fetched successfully from {self.url}")
         except Exception as e:
-            print(f"An error occurred: {e}")
+            print(f"An error occurred: {e}\n")
 
     # Resolve redirects for a given link and return the final URL if it's a GitHub link.
     def resolve_redirect(self, link: str) -> Optional[str]:
         try:
             if not isinstance(link, str): return None
             if not link.startswith(('http:', 'https:')): return None
-
-            print(f"Resolving redirect for {link}...")
 
             # Make a HEAD request to follow redirects
             response = requests.head(link, allow_redirects=True, timeout=5)
@@ -55,12 +53,19 @@ class Apache_web_miner:
                     if isinstance(link, str) and 'github.com' not in link:
                         links_to_check.append(link)
 
-        # Use multithreading to resolve redirects for all collected links
-        print(f"Resolving {len(links_to_check)} links using {self.num_threads} threads...")
+        total_links = len(links_to_check)
+        print(f"Resolving {total_links} links using {self.num_threads} threads...\n")
+
+        results = []
         with ThreadPool(self.num_threads) as pool:
-            # pool.map runs resolve_redirect on every link in the list simultaneously
-            results = pool.map(self.resolve_redirect, links_to_check)
+            # Use imap to preserve order and update progress bar
+            for i, result in enumerate(pool.imap(self.resolve_redirect, links_to_check)):
+                results.append(result)
+                # Update the progress bar
+                miner_intro.update_progress(i + 1, total_links)
         
+        print("\n")
+
         # Create a "Lookup Table" (Dictionary) for resolved links.
         resolved_cache = dict(zip(links_to_check, results))
 
