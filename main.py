@@ -6,11 +6,12 @@ from typing import Dict, List
 from apache_web_miner import fetch_project_data
 from utils import measure_time 
 import miner_intro
+import miner_intro
     
 # Main function
 @measure_time
 def main() -> None:
-    miner_intro.runAll()
+    miner_intro.run_all()
 
     # Fetch project data either from local file or by mining from Apache.
     projects: Dict[str, List[str]] = fetch_project_data()

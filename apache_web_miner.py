@@ -1,5 +1,9 @@
 # Import necessary libraries
-import requests, os, json, miner_intro
+import os
+import json
+import requests
+import miner_intro
+
 from utils import measure_time
 from typing import List, Optional, Dict
 from multiprocessing.pool import ThreadPool
@@ -56,18 +60,19 @@ class Apache_web_miner:
         total_links = len(links_to_check)
         print(f"Resolving {total_links} links using {self.num_threads} threads...\n")
 
-        results = []
-        with ThreadPool(self.num_threads) as pool:
+        resolved_cache = {}
+        with ThreadPool(self.num_threads) as pool:\
+            # Define a helper to keep context
+            def worker_wrapper(link):
+                return link, self.resolve_redirect(link)
+            
             # Use imap to preserve order and update progress bar
-            for i, result in enumerate(pool.imap(self.resolve_redirect, links_to_check)):
-                results.append(result)
+            for i, (original_link, result) in enumerate(pool.imap_unordered(worker_wrapper, links_to_check)):
+                resolved_cache[original_link] = result
                 # Update the progress bar
                 miner_intro.update_progress(i + 1, total_links)
         
         print("\n")
-
-        # Create a "Lookup Table" (Dictionary) for resolved links.
-        resolved_cache = dict(zip(links_to_check, results))
 
         for project_id, details in self.data.items():
             if 'repository' in details:
