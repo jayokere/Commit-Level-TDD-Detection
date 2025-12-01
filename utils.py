@@ -5,7 +5,7 @@ from functools import wraps
 def measure_time(func):
     @wraps(func) # Preserves the metadata of the original function
     def wrapper(*args, **kwargs):
-        print(f"⏱️ Starting '{func.__name__}'...")
+        print(f"⏱️  Starting '{func.__name__}'...")
         start_time = time.perf_counter()
         
         result = func(*args, **kwargs) # Execute the actual function
