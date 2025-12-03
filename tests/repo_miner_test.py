@@ -1,5 +1,5 @@
 import datetime
-import types
+import repo_miner
 from repo_miner import Repo_miner
 
 
@@ -43,8 +43,8 @@ def test_mine_repo_returns_expected_structure(monkeypatch):
     fake_repo = FakeRepo("https://example.com/repo.git", single='1bdad6c')
     fake_repo.commits = [c1, c2]
 
-    # Patch the Repository used inside repo_miner
-    monkeypatch.setattr(Repo_miner.mine_repo, "Repository", lambda repo_url, single=None: fake_repo)
+    # Patch the Repository used inside the repo_miner module
+    monkeypatch.setattr(repo_miner, "Repository", lambda repo_url, single=None: fake_repo)
 
     result = Repo_miner.mine_repo("https://example.com/repo.git")
 
@@ -74,7 +74,7 @@ def test_mine_repo_handles_no_modified_files(monkeypatch):
     fake_repo = FakeRepo("local/path", single='1bdad6c')
     fake_repo.commits = [c]
 
-    monkeypatch.setattr(Repo_miner.mine_repo, "Repository", lambda repo_url, single=None: fake_repo)
+    monkeypatch.setattr(repo_miner, "Repository", lambda repo_url, single=None: fake_repo)
 
     result = Repo_miner.mine_repo("local/path")
 
