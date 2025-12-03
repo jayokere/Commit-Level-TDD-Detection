@@ -50,7 +50,7 @@ def loading_animation(duration=3):
     print("\033[92m[ACCESS GRANTED] Uplink Established.\033[0m\n")
 
 # Function to update the progress bar during the link resolution process
-def update_progress(current, total):
+def update_progress(current, total, label="PROCESSING"):
     PROGRESS_BAR_LENGTH = 40
     percent = float(current) * 100 / total
     filled_length = int(PROGRESS_BAR_LENGTH * current // total)
@@ -60,7 +60,7 @@ def update_progress(current, total):
     icon = SPINNER[current % 4]
     
     # Cyan colour for the bar
-    sys.stdout.write(f"\r\033[96m{icon} RESOLVING [{bar}] {int(percent)}% ({current}/{total})\033[0m")
+    sys.stdout.write(f"\r\033[96m{icon} {label} [{bar}] {int(percent)}% ({current}/{total})\033[0m")
     sys.stdout.flush()
 
 def run_all():

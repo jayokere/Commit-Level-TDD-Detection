@@ -100,13 +100,13 @@ class Apache_web_miner:
 @measure_time 
 def fetch_project_data() -> Dict[str, List[str]]:
     # Load data from local file if it exists. Otherwise, fetch data from Apache.
-    if os.path.exists(DATA_FILE):
+    if os.path.exists(DATA_FILE) and os.path.getsize(DATA_FILE) > 0:
         print(f"Loading data from local file: {DATA_FILE}...")
         with open(DATA_FILE, 'r') as f:
             data: Dict[str, List[str]] = json.load(f)
             return data
     else:
-        print("Local file not found. Mining data from Apache...")
+        print("No data found. Mining data from Apache...")
         
         # Fetch data from Apache's projects JSON API and extract GitHub links.
         miner = Apache_web_miner(APACHE_URL)
