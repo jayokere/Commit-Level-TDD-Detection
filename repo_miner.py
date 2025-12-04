@@ -1,4 +1,4 @@
-from concurrent.futures import Executor, ProcessPoolExecutor, as_completed
+from concurrent.futures import Executor, ProcessPoolExecutor, as_completed, TimeoutError
 from pathlib import Path
 import json
 import os
@@ -95,7 +95,7 @@ if __name__ == "__main__":
                     })
 
                     tqdm.write(f"[DONE] Finished mining: {url}")
-                except concurrent.futures.TimeoutError:
+                except TimeoutError:
                     tqdm.write(f"[TIMEOUT] Skipped {repo_url} after 10 minutes.")
                     continue
 
