@@ -4,7 +4,8 @@ import json
 import re
 import os
 
-from pathlib import Path
+from db import get_collection
+from pymongo import UpdateOne
 from typing import Dict, List, Tuple
 from multiprocessing.pool import ThreadPool
 from requests.adapters import HTTPAdapter
@@ -33,19 +34,21 @@ class RateLimitExceededError(Exception):
     pass
 
 class sort_projects:
-    # Load Apache projects JSON into a module variable
-    APACHE_PROJECTS_PATH: Path = Path(__file__).resolve().parent / "data" / "apache_projects.json"
     # Flag to ensure we only show the unauthenticated warning once
     is_warning_shown: bool = False
     def __init__(self) -> None:
         self.API_err: List[str] = []
         self.num_threads: int = 50
 
-        if self.APACHE_PROJECTS_PATH.exists():
-            with open(self.APACHE_PROJECTS_PATH, "r", encoding="utf-8") as _f:
-                self.apache_projects: Dict[str, List[str]] = json.load(_f)
-        else:
-            self.apache_projects = {}
+        # Initialise DB connection and get the collection for storing mined projects
+        self.collection = get_collection("mined-repos")
+        self.apache_projects: Dict[str, List[str]] = {}
+
+        # Load existing projects from MongoDB into memory
+        mined_entries = self.collection.find({}, {"name": 1, "urls": 1, "_id": 0})
+        for entry in mined_entries:
+            if "name" in entry and "urls" in entry:
+                self.apache_projects[entry["name"]] = entry["urls"]
         
         self.session = requests.Session()
         
@@ -100,14 +103,14 @@ class sort_projects:
             commit_count (int): The total number of commits in the repository.
         """
         # Remove trailing .git and trailing slashes to prevent 404s
-        repo_url: str = repo_url.strip().rstrip("/")
-        if repo_url.endswith(".git"):
-            repo_url: str = repo_url[:-4]
+        cleaned_url: str = repo_url.strip().rstrip("/")
+        if cleaned_url.endswith(".git"):
+            cleaned_url = cleaned_url[:-4]
 
-        if "github.com" not in repo_url:
+        if "github.com" not in cleaned_url:
             return 0
         
-        api_url: str = repo_url.replace("github.com", "api.github.com/repos") + "/commits?per_page=1"
+        api_url: str = cleaned_url.replace("github.com", "api.github.com/repos") + "/commits?per_page=1"
 
         try:
             response = self.session.get(api_url, timeout=10)
@@ -240,28 +243,33 @@ class sort_projects:
         # If we hit rate limit, we abort without writing the file
         if aborted:
             print("⚠️  Process aborted due to Rate Limit.")
-            print("   The 'apache_projects.json' file was NOT updated to preserve integrity.\n")
+            print("   The database was NOT updated to preserve integrity.\n")
             return 0
 
-        # Sort by commit count (index 2) in descending order
+        # Sort by commit count (index 2) in ascending order
         scored_projects.sort(key=lambda x: x[2], reverse=True)
 
-        # Rebuild the dictionary in the original format: {Name: [Links]}
-        sorted_dict: Dict[str, List[str]] = {item[0]: item[1] for item in scored_projects}
-        
         # Print API errors if any
         if self.API_err:
             print("\nAPI Errors encountered during sorting:")
             for err in self.API_err:
                 print(err)
         
-        # Update the JSON file with the sorted data
-        print(f"\nWriting sorted data to {self.APACHE_PROJECTS_PATH}...")
-        with open(self.APACHE_PROJECTS_PATH, "w", encoding="utf-8") as f:
-            json.dump(sorted_dict, f, indent=4)
+        # Update the DB with the sorted data
+        print(f"\nUpdating projects in MongoDB...")
+        updates = []
+        for name, links, count in scored_projects:
+            updates.append(UpdateOne({"name": name}, {"$set": {"commit_count": count}}))
+
+        if updates:
+            self.collection.bulk_write(updates)
+            # Creates an index on commit_count (descending)
+            # -1 means descending order (highest commits first)
+            print("Creating index for fast sorting...")
+            self.collection.create_index([("commit_count", -1)])
             
         print("✅ Done! The project list is now sorted by activity.")
-        return len(sorted_dict)
+        return len(scored_projects)
 
 if __name__ == "__main__":
     sort_projects().sort_by_commit_count()

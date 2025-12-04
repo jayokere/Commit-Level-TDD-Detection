@@ -9,15 +9,15 @@ from typing import List, Optional, Dict
 from multiprocessing.pool import ThreadPool
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+from db import get_collection
 
 # Constants
-DATA_FILE: str = 'data/apache_projects.json'
-ERROR_FILE: str = 'data/mining_errors.json'
 APACHE_URL: str = "https://projects.apache.org/json/foundation/projects.json"
+REPO_COLLECTION: str = "mined-repos"
 
 # Define a class to fetch data from the Apache Foundation's projects JSON API and extract GitHub links.
 class Apache_web_miner:
-    def __init__(self, target_url: str, num_threads: int = 150):
+    def __init__(self, target_url: str, num_threads: int = 50):
         self.url = target_url
         self.data = {}
         self.num_threads = num_threads
@@ -113,27 +113,34 @@ class Apache_web_miner:
 # Function to fetch project data either from a local file or by mining from Apache
 @measure_time 
 def fetch_project_data() -> Dict[str, List[str]]:
-    # Load data from local file if it exists. Otherwise, fetch data from Apache.
-    if os.path.exists(DATA_FILE) and os.path.getsize(DATA_FILE) > 0:
-        print(f"Loading data from local file: {DATA_FILE}...")
-        with open(DATA_FILE, 'r') as f:
-            data: Dict[str, List[str]] = json.load(f)
-            return data
-    else:
-        print("No data found. Mining data from Apache...")
+    # Connect to MongoDB and get the collection
+    collection = get_collection(REPO_COLLECTION)
+    
+    # Check if the collection has existing documents
+    if collection.count_documents({}) > 0:
+        print(f"Loading data from MongoDB collection: {REPO_COLLECTION}...")
+
+        data: Dict[str, List[str]] = {}
+        mined_entries = collection.find({}, {'name': 1, 'urls': 1, '_id': 0})
         
-        # Fetch data from Apache's projects JSON API and extract GitHub links.
+        for entry in mined_entries:
+            if 'name' in entry and 'urls' in entry:
+                data[entry['name']] = entry['urls']
+                
+        return data
+    else:
+        print("No data found in Database. Mining data from Apache...")
+        
         miner = Apache_web_miner(APACHE_URL)
         miner.fetch_data()
         links: Dict[str, List[str]] = miner.get_github_links()
 
-        # Save the fetched data to a local file for future use.
-        print(f"Saving new data to {DATA_FILE}...")
-        folder_path = os.path.dirname(DATA_FILE)
-        if folder_path: 
-            os.makedirs(folder_path, exist_ok=True)
-        with open(DATA_FILE, "w") as f:
-            json.dump(links, f, indent=4)
+        print(f"Saving new data to MongoDB collection {REPO_COLLECTION}...")
+        
+        documents = [{"name": name, "urls": urls} for name, urls in links.items()]
+        
+        if documents:
+            collection.insert_many(documents)
             
         return links
 
