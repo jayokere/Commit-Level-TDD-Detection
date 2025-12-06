@@ -75,10 +75,7 @@ def get_projects_to_mine():
     Fetches the list of projects from 'mined-repos', sorted by commit count (Smallest first).
     """
     col = get_collection(REPO_COLLECTION)
-    cursor = col.find(
-        {"commit_count": {"$exists": True}},
-        {"name": 1, "urls": 1, "commit_count": 1, "_id": 0}
-    ).sort("commit_count", ASCENDING)
+    cursor = col.find().sort("commit_count", ASCENDING)
     return list(cursor)
 
 def get_existing_commit_hashes(project_name):
