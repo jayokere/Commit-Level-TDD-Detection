@@ -1,220 +1,191 @@
 import pytest
-import sys
-import os
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch, PropertyMock
+from repo_miner import Repo_miner, VALID_CODE_EXTENSIONS
 
-# -------------------------------------------------------------------------
-# 1. Mock External Dependencies BEFORE Importing the Unit Under Test
-# -------------------------------------------------------------------------
-# We mock 'db' and 'utils' so we don't need real database connections
-# or the actual utils module present.
-sys.modules["db"] = MagicMock()
-sys.modules["utils"] = MagicMock()
-
-# Mock the measure_time decorator to just run the function
-sys.modules["utils"].measure_time = lambda func: func
-
-# Now safely import the class
-from repo_miner import Repo_miner
-
-# -------------------------------------------------------------------------
-# 2. Test Fixtures
-# -------------------------------------------------------------------------
+# --- Fixtures to mock external dependencies ---
 
 @pytest.fixture
-def miner():
-    """Creates a Repo_miner instance with mocked DB calls."""
-    # Mock the project fetch inside __init__
-    with patch("repo_miner.get_projects_to_mine") as mock_get_projects:
-        mock_get_projects.return_value = [
-            {"name": "Project A", "urls": ["http://github.com/a"]},
-            {"name": "Project B", "urls": ["http://github.com/b"]}
-        ]
-        miner_instance = Repo_miner()
-        return miner_instance
+def mock_db():
+    """Mocks the database functions to prevent real DB connections."""
+    with patch('repo_miner.get_java_projects_to_mine') as mock_java, \
+         patch('repo_miner.get_python_projects_to_mine') as mock_python, \
+         patch('repo_miner.get_cpp_projects_to_mine') as mock_cpp, \
+         patch('repo_miner.get_existing_commit_hashes') as mock_hashes, \
+         patch('repo_miner.save_commit_batch') as mock_save:
+        
+        # Setup sample return values
+        mock_java.return_value = [{'name': 'java-repo', 'url': 'http://github.com/test/java'}]
+        mock_python.return_value = [{'name': 'py-repo', 'url': 'http://github.com/test/py'}]
+        mock_cpp.return_value = [{'name': 'cpp-repo', 'url': 'http://github.com/test/cpp'}]
+        mock_hashes.return_value = set() # No existing hashes by default
+        
+        yield {
+            'java': mock_java,
+            'hashes': mock_hashes,
+            'save': mock_save
+        }
 
 @pytest.fixture
-def mock_commit():
-    """Creates a dummy PyDriller commit object."""
-    commit = MagicMock()
-    commit.hash = "abc123456789"
-    commit.msg = "Test commit message"
-    commit.committer_date = "2024-01-01"
-    
-    # Create mock ModifiedFile objects
-    file1 = MagicMock()
-    file1.filename = "TestClass.java"
-    
-    file2 = MagicMock()
-    file2.filename = "ProductionCode.py"
-    
-    file3 = MagicMock()
-    file3.filename = "README.md" # Should be filtered out
-    
-    commit.modified_files = [file1, file2, file3]
-    return commit
+def mock_pydriller():
+    """Mocks the Repository class to prevent actual git cloning."""
+    with patch('repo_miner.Repository') as mock_repo:
+        yield mock_repo
 
-# -------------------------------------------------------------------------
-# 3. Unit Tests: Static Helper Methods
-# -------------------------------------------------------------------------
+# --- Unit Tests ---
 
-def test_clean_url():
-    """Test URL sanitization logic."""
-    # Valid HTTPS
-    assert Repo_miner.clean_url("https://github.com/apache/spark") == "https://github.com/apache/spark"
-    # Trailing slashes
-    assert Repo_miner.clean_url("https://github.com/apache/spark/  ") == "https://github.com/apache/spark"
-    # SCP-like syntax (the specific bug fix)
-    assert Repo_miner.clean_url("https://user:pass@github.com:apache/spark.git") == "https://user:pass@github.com/apache/spark.git"
-    # None handling
+def test_clean_url_valid():
+    """Test that URLs are cleaned correctly."""
+    assert Repo_miner.clean_url("https://github.com/user/repo") == "https://github.com/user/repo"
+    assert Repo_miner.clean_url("https://github.com/user/repo/") == "https://github.com/user/repo"
+
+def test_clean_url_correction():
+    """Test that malformed port-style URLs are fixed."""
+    malformed = "https://github.com:user/repo"
+    expected = "https://github.com/user/repo"
+    assert Repo_miner.clean_url(malformed) == expected
+
+def test_clean_url_none():
+    """Test that None input returns None."""
     assert Repo_miner.clean_url(None) is None
 
-def test_identify_files_logic():
-    """Test the file filtering logic (Tests + Source Code)."""
-    
-    # Mix of files
-    files = [
-        MagicMock(filename="Main.java"),       # Source (Keep)
-        MagicMock(filename="test_utils.py"),   # Test (Keep)
-        MagicMock(filename="image.png"),       # Asset (Drop)
-        MagicMock(filename="config.xml"),      # Config (Drop)
-        MagicMock(filename="script.sh"),       # Unknown ext (Drop)
-        MagicMock(filename=None)               # Invalid (Drop)
-    ]
-    
-    kept = Repo_miner.identify_files(files)
-    
-    assert "Main.java" in kept
-    assert "test_utils.py" in kept
-    assert "image.png" not in kept
-    assert "config.xml" not in kept
-    assert len(kept) == 2
+def test_is_valid_file_source_code():
+    """Test that valid source extensions are accepted."""
+    mock_file = MagicMock()
+    mock_file.filename = "Main.java"
+    assert Repo_miner.is_valid_file(mock_file) is True
 
-# -------------------------------------------------------------------------
-# 4. Unit Tests: Worker Logic (mine_repo)
-# -------------------------------------------------------------------------
+    mock_file.filename = "script.py"
+    assert Repo_miner.is_valid_file(mock_file) is True
 
-@patch("repo_miner.Repository")
-@patch("repo_miner.get_existing_commit_hashes")
-@patch("repo_miner.save_commit_batch")
-def test_mine_repo_normal_flow(mock_save, mock_get_hashes, mock_repo_cls):
+def test_is_valid_file_tests():
+    """Test that files with 'test' in the name are accepted regardless of extension."""
+    mock_file = MagicMock()
+    mock_file.filename = "MyTestFile.txt" # Weird extension, but name has 'test'
+    assert Repo_miner.is_valid_file(mock_file) is True
+
+def test_is_valid_file_ignored():
+    """Test that non-code files are rejected."""
+    mock_file = MagicMock()
+    mock_file.filename = "readme.md"
+    assert Repo_miner.is_valid_file(mock_file) is False
+
+    mock_file.filename = "config.xml"
+    assert Repo_miner.is_valid_file(mock_file) is False
+
+def test_miner_initialisation_sampling(mock_db):
+    """Test that the miner samples 60 projects from each language."""
+    # We need enough items to sample from, or random.sample throws an error
+    mock_db['java'].return_value = [{'name': f'p{i}', 'url': 'u'} for i in range(100)]
+    
+    # We patch random.sample to just return the list so we can verify the calls
+    with patch('random.sample', side_effect=lambda pop, k: pop[:k]) as mock_sample:
+        miner = Repo_miner()
+        
+        # Should call sample 3 times (Java, Python, C++)
+        assert mock_sample.call_count == 3
+        # Should verify the sample size is 60
+        mock_sample.assert_any_call(mock_db['java'].return_value, 60)
+
+# --- Integration / Logic Tests (Mocked) ---
+
+def test_mine_repo_success(mock_db, mock_pydriller):
     """
-    Test a successful mining run where:
-    1. One commit is already in DB (skipped).
-    2. One commit is new and relevant (saved).
-    3. One commit is new but irrelevant/docs (skipped).
+    Test the core logic: 
+    1. Iterates commits
+    2. Extracts DMM and Complexity
+    3. Saves data
     """
-    # Setup args
-    project_name = "TestProject"
-    url = "http://github.com/test"
+    # 1. Setup Mock Commit
+    mock_commit = MagicMock()
+    mock_commit.hash = "hash123"
+    mock_commit.committer_date = "2023-01-01"
+    
+    # Mock the DMM property on the commit
+    type(mock_commit).dmm_unit_size = PropertyMock(return_value=0.5)
+
+    # 2. Setup Mock File
+    mock_file = MagicMock()
+    mock_file.filename = "Test.java"
+    mock_file.complexity = 10
+    
+    # Mock changed methods
+    mock_method = MagicMock()
+    mock_method.name = "doSomething"
+    mock_file.changed_methods = [mock_method]
+    
+    mock_commit.modified_files = [mock_file]
+    
+    # 3. Configure Pydriller to return this commit
+    mock_repo_instance = mock_pydriller.return_value
+    mock_repo_instance.traverse_commits.return_value = [mock_commit]
+
+    # 4. Run the worker function
     stop_event = MagicMock()
     stop_event.is_set.return_value = False
     
-    # 1. Mock DB Hashes (Commit A is already known)
-    mock_get_hashes.return_value = {"hash_A"}
-    
-    # 2. Mock PyDriller Repository Commits
-    commit_A = MagicMock(hash="hash_A") # Existing
-    
-    commit_B = MagicMock(hash="hash_B", msg="New Code", committer_date="2024") # Relevant
-    commit_B.modified_files = [MagicMock(filename="App.java")]
-    
-    commit_C = MagicMock(hash="hash_C", msg="Docs", committer_date="2024") # Irrelevant
-    commit_C.modified_files = [MagicMock(filename="README.md")]
-    
-    mock_repo_instance = mock_repo_cls.return_value
-    mock_repo_instance.traverse_commits.return_value = [commit_A, commit_B, commit_C]
-    
-    # Run
-    result = Repo_miner.mine_repo((project_name, url, stop_event))
-    
-    # Assertions
-    # Return format: (project, added_count, existing_count, error)
-    assert result == (project_name, 1, 1, None)
-    
-    # Verify save was called exactly once for commit_B
-    mock_save.assert_called_once()
-    saved_batch = mock_save.call_args[0][0]
-    assert len(saved_batch) == 1
-    assert saved_batch[0]['hash'] == "hash_B"
-    assert saved_batch[0]['files'] == ["App.java"]
+    args = ("test-project", "http://github.com/test", stop_event)
+    result = Repo_miner.mine_repo(args)
 
-def test_mine_repo_stop_event():
-    """Test immediate exit if stop_event is set."""
-    stop_event = MagicMock()
-    stop_event.is_set.return_value = True
-    
-    result = Repo_miner.mine_repo(("Proj", "url", stop_event))
-    assert result is None
+    # 5. Assertions
+    # FIX: Explicitly assert result is not None to satisfy Pylance static analysis
+    assert result is not None, "Result should not be None when stop_event is not set"
 
-def test_mine_repo_bad_url():
-    """Test the guard clause for invalid URLs."""
+    project_name, new, existing, error = result
+    
+    assert project_name == "test-project"
+    assert new == 1
+    assert error is None
+    
+    # Check if save was called with correct structure
+    mock_db['save'].assert_called()
+    saved_data = mock_db['save'].call_args[0][0][0] # First arg, first item in list
+    
+    assert saved_data['hash'] == "hash123"
+    assert saved_data['dmm_unit_size'] == 0.5
+    assert saved_data['modified_files'][0]['filename'] == "Test.java"
+    assert saved_data['modified_files'][0]['complexity'] == 10
+    assert saved_data['modified_files'][0]['changed_methods'] == ["doSomething"]
+
+def test_mine_repo_skips_existing(mock_db, mock_pydriller):
+    """Test that commits already in DB are skipped."""
+    # Setup DB to say "hash123" already exists
+    mock_db['hashes'].return_value = {"hash123"}
+    
+    mock_commit = MagicMock()
+    mock_commit.hash = "hash123"
+    
+    mock_repo_instance = mock_pydriller.return_value
+    mock_repo_instance.traverse_commits.return_value = [mock_commit]
+    
     stop_event = MagicMock()
     stop_event.is_set.return_value = False
     
-    result = Repo_miner.mine_repo(("Proj", None, stop_event))
+    args = ("test-project", "http://github.com/test", stop_event)
+    result = Repo_miner.mine_repo(args)
     
-    # ADD THIS LINE: Assert result is not None to satisfy Pylance
-    assert result is not None 
-    
-    # Should return an error tuple indicating skip
-    assert result[3] == "Skipped: Invalid or missing URL"
-
-@patch("repo_miner.Repository")
-def test_mine_repo_exception_handling(mock_repo_cls):
-    """Test that worker catches exceptions and returns them safely."""
-    stop_event = MagicMock()
-    stop_event.is_set.return_value = False
-    
-    # Make PyDriller crash
-    mock_repo_cls.side_effect = Exception("Git Error")
-    
-    result = Repo_miner.mine_repo(("Proj", "http://bad.url", stop_event))
-    
-    # ADD THIS LINE: Assert result is not None
+    # FIX: Explicit assertion for type safety
     assert result is not None
+
+    # Should have 0 new commits
+    assert result[1] == 0 
+    # save_commit_batch should NOT be called
+    mock_db['save'].assert_not_called()
+
+def test_mine_repo_handles_error(mock_db, mock_pydriller):
+    """Test that exceptions are caught and returned safely."""
+    # Force Pydriller to raise an exception
+    # This mimics the behaviour of a network failure
+    mock_repo_instance = mock_pydriller.return_value
+    mock_repo_instance.traverse_commits.side_effect = Exception("Git Error")
     
-    assert result[0] == "Proj"
+    stop_event = MagicMock()
+    stop_event.is_set.return_value = False
+    
+    args = ("test-project", "http://github.com/test", stop_event)
+    result = Repo_miner.mine_repo(args)
+    
+    # FIX: Explicit assertion for type safety
+    assert result is not None
+
+    # Check error message is returned
     assert result[3] == "Git Error"
-
-# -------------------------------------------------------------------------
-# 5. Integration Test: The Run Loop
-# -------------------------------------------------------------------------
-
-@patch("repo_miner.ProcessPoolExecutor")
-@patch("repo_miner.as_completed")
-@patch("repo_miner.ensure_indexes")
-@patch("repo_miner.tqdm")
-def test_run_orchestration(mock_tqdm, mock_ensure_idx, mock_as_completed, mock_executor, miner):
-    """
-    Test that the main loop submits jobs and processes results.
-    """
-    # Setup mocks
-    mock_manager = MagicMock()
-    mock_executor_instance = mock_executor.return_value
-    mock_executor_instance.__enter__.return_value = mock_executor_instance
-    
-    # Create fake Futures
-    future_success = MagicMock()
-    future_success.result.return_value = ("Project A", 10, 5, None)
-    
-    future_fail = MagicMock()
-    future_fail.result.return_value = ("Project B", 0, 0, "Network Error")
-    
-    mock_as_completed.return_value = [future_success, future_fail]
-    
-    # Run
-    # We patch Manager context manager to avoid multiprocessing overhead
-    with patch("repo_miner.Manager", return_value=mock_manager):
-        miner.run()
-    
-    # Verify jobs submitted
-    # We have 2 projects in the fixture, so 2 submits expected
-    assert mock_executor_instance.submit.call_count == 2
-    
-    # Verify results logging
-    # 'tqdm.write' should be called for success and failure messages
-    assert mock_tqdm.write.call_count >= 2
-    
-    # Verify indexes created at end
-    mock_ensure_idx.assert_called_once()

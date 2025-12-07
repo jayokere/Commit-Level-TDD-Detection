@@ -162,7 +162,7 @@ class TestApacheGitHubMiner(unittest.TestCase):
 
     @patch('apache_miner.ApacheGitHubMiner.get_commit_count')
     @patch('apache_miner.ApacheGitHubMiner.fetch_candidate_repos')
-    @patch('multiprocessing.pool.ThreadPool') 
+    @patch('apache_miner.ThreadPool') 
     def test_run_success_flow(self, mock_threadpool, mock_fetch, mock_get_commits):
         """
         Test the main run loop.
@@ -173,24 +173,27 @@ class TestApacheGitHubMiner(unittest.TestCase):
         ]
         
         # 2. Mock ThreadPool
+        # Since ThreadPool is used as a Context Manager (with ... as pool:),
+        # we must mock the return value of __enter__.
         mock_pool_instance = mock_threadpool.return_value
         mock_pool_instance.__enter__.return_value = mock_pool_instance
         
         processed_result = {
             "name": "Repo1", "url": "u1", "language": "Java", "commits": 100
         }
+        # Now that we patched the correct object, this return value will actually be used
         mock_pool_instance.imap_unordered.return_value = [processed_result]
-
+        
         # 3. Run
         self.miner.run()
-
+        
         # 4. Assert
         # Check that we fetched repos
         mock_fetch.assert_called_once()
         
         # Check that we SAVED to the DB.
-        # We access 'mock_db' directly because that is what sys.modules['db'] points to.
+        # Ensure 'mock_db' is available in your test class scope or imported
         mock_db.save_repo_batch.assert_called_once_with([processed_result], "mined-repos")
-
+        
 if __name__ == '__main__':
     unittest.main()

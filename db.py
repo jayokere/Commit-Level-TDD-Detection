@@ -128,3 +128,12 @@ def ensure_indexes():
     col.create_index([("hash", ASCENDING)])
     col.create_index([("date", DESCENDING)])
     print("[DB] Indexes verified.")
+    
+def get_all_mined_project_names():
+    """
+    Returns a set of project names that already exist in the mined-commits collection.
+    Used to calculate quotas.
+    """
+    col = get_collection(COMMIT_COLLECTION)
+    # .distinct() is very efficient for getting unique values
+    return set(col.distinct("project"))
