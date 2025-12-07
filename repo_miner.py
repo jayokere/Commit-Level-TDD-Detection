@@ -4,11 +4,13 @@ from multiprocessing import Manager
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from tqdm import tqdm
 from pydriller import Repository
-
+import random
 # Internal Modules
 from utils import measure_time
 from db import (
-    get_projects_to_mine, 
+    get_java_projects_to_mine,
+    get_python_projects_to_mine,
+    get_cpp_projects_to_mine, 
     get_existing_commit_hashes, 
     save_commit_batch, 
     ensure_indexes
@@ -36,7 +38,8 @@ VALID_CODE_EXTENSIONS = {
 class Repo_miner:
     def __init__(self):
         print("Fetching project list from database...")
-        self.projects = get_projects_to_mine()
+        self.projects = random.sample(get_java_projects_to_mine(), 60) + random.sample(get_python_projects_to_mine(), 60)+ random.sample(get_cpp_projects_to_mine(), 60)
+
 
     @staticmethod
     def clean_url(url):
@@ -133,8 +136,8 @@ class Repo_miner:
     def run(self):
         jobs = []
         for p in self.projects:
-            if 'urls' in p and p['urls']:
-                jobs.append((p['name'], p['urls'][0]))
+            if 'url' in p and p['url']:
+                jobs.append((p['name'], p['url'][0]))
 
         if not jobs:
             print("No projects found to mine.")
