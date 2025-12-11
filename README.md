@@ -52,11 +52,11 @@ Currently, this application connects to the Apache Software Foundation's public 
     ```
 
 4. **.env file setup
-   '''bash
+   ```bash
    GITHUB_TOKEN={GITHUB_TOKEN}
    MONGODB_USER="MongoDB_username"
    MONGODB_PWD="MongoDB_password"
-   '''
+   ```
    
 ## ⚙️ Usage
 
