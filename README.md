@@ -51,6 +51,13 @@ Currently, this application connects to the Apache Software Foundation's public 
     pip install -r requirements.txt
     ```
 
+4. **.env file setup
+   '''bash
+   GITHUB_TOKEN={GITHUB_TOKEN}
+   MONGODB_USER="MongoDB_username"
+   MONGODB_PWD="MongoDB_password"
+   '''
+   
 ## ⚙️ Usage
 
 To execute the miner, run the main script from the root directory:
