@@ -72,6 +72,90 @@ def test_is_valid_file_ignored():
     mock_file.filename = "config.xml"
     assert Repo_miner.is_valid_file(mock_file) is False
 
+def test_is_test_file():
+    """Test that test files are correctly identified."""
+    assert Repo_miner.is_test_file("shapes_test.py") is True
+    assert Repo_miner.is_test_file("TestCalculator.java") is True
+    assert Repo_miner.is_test_file("test_utils.py") is True
+    assert Repo_miner.is_test_file("shapes.py") is False
+    assert Repo_miner.is_test_file("Calculator.java") is False
+    assert Repo_miner.is_test_file(None) is False
+
+def test_extract_tested_files_from_methods():
+    """Test extraction of tested files based on test method names."""
+    # Setup mock files
+    mock_files = []
+    
+    # Test file
+    test_file = MagicMock()
+    test_file.filename = "shapes_test.py"
+    mock_files.append(test_file)
+    
+    # Source files
+    shape_file = MagicMock()
+    shape_file.filename = "shapes.py"
+    mock_files.append(shape_file)
+    
+    square_file = MagicMock()
+    square_file.filename = "square.py"
+    mock_files.append(square_file)
+    
+    triangle_file = MagicMock()
+    triangle_file.filename = "triangle.py"
+    mock_files.append(triangle_file)
+    
+    # Test methods that reference square and triangle
+    test_methods = ["test_square_area", "test_triangle_perimeter", "test_shape_color"]
+    
+    tested_files = Repo_miner.extract_tested_files_from_methods(test_methods, mock_files)
+    
+    # Should identify square.py, triangle.py, and shapes.py as tested
+    assert "square.py" in tested_files
+    assert "triangle.py" in tested_files
+    assert "shapes.py" in tested_files
+    assert "shapes_test.py" not in tested_files  # Test file itself should not be included
+
+def test_analyze_test_coverage():
+    """Test the analyze_test_coverage function."""
+    # Setup mock files
+    mock_files = []
+    
+    # Test file with test methods
+    test_file = MagicMock()
+    test_file.filename = "calculator_test.py"
+    test_method1 = MagicMock()
+    test_method1.name = "test_calculator_add"
+    test_method2 = MagicMock()
+    test_method2.name = "test_calculator_subtract"
+    test_file.changed_methods = [test_method1, test_method2]
+    mock_files.append(test_file)
+    
+    # Source file
+    calc_file = MagicMock()
+    calc_file.filename = "calculator.py"
+    calc_method = MagicMock()
+    calc_method.name = "add"
+    calc_file.changed_methods = [calc_method]
+    mock_files.append(calc_file)
+    
+    coverage = Repo_miner.analyze_test_coverage(mock_files)
+    
+    # Verify structure
+    assert 'test_files' in coverage
+    assert 'source_files' in coverage
+    assert 'tested_files' in coverage
+    
+    # Verify test files identified
+    assert len(coverage['test_files']) == 1
+    assert coverage['test_files'][0]['filename'] == "calculator_test.py"
+    
+    # Verify source files identified
+    assert len(coverage['source_files']) == 1
+    assert coverage['source_files'][0]['filename'] == "calculator.py"
+    
+    # Verify tested files identified
+    assert "calculator.py" in coverage['tested_files']
+
 def test_miner_initialisation_sampling(mock_db):
     """Test that the miner samples 60 projects from each language."""
     # We need enough items to sample from, or random.sample throws an error
@@ -145,6 +229,12 @@ def test_mine_repo_success(mock_db, mock_pydriller):
     assert saved_data['modified_files'][0]['filename'] == "Test.java"
     assert saved_data['modified_files'][0]['complexity'] == 10
     assert saved_data['modified_files'][0]['changed_methods'] == ["doSomething"]
+    
+    # Verify test_coverage is included
+    assert 'test_coverage' in saved_data
+    assert 'test_files' in saved_data['test_coverage']
+    assert 'source_files' in saved_data['test_coverage']
+    assert 'tested_files' in saved_data['test_coverage']
 
 def test_mine_repo_skips_existing(mock_db, mock_pydriller):
     """Test that commits already in DB are skipped."""
