@@ -418,7 +418,8 @@ class Repo_miner:
         print(f"[INFO] Starting RICH-METRIC mining cycle for {total_jobs} repositories...")
         
         # Determine number of workers based on available CPU cores to ensure full performance
-        max_workers = os.cpu_count() or 4
+        # Allow modest oversubscription to better hide I/O latency; safe for I/O-heavy tasks
+        max_workers = (os.cpu_count() or 4) * 2
         max_workers = min(total_jobs, max_workers)
         
         print(f"[INFO] Using {max_workers} worker processes")
@@ -426,11 +427,11 @@ class Repo_miner:
         # 'Manager' creates a shared state (Event) to allow synchronised stopping across processes
         with Manager() as manager:
             stop_event = manager.Event()
-            executor = ProcessPoolExecutor(max_workers=max_workers)
             futures = []
 
             # tqdm provides a visual progress bar in the console
-            with tqdm(total=total_jobs, desc="TOTAL PROGRESS", unit="repo") as overall_pbar:
+            with ProcessPoolExecutor(max_workers=max_workers) as executor, \
+                 tqdm(total=total_jobs, desc="TOTAL PROGRESS", unit="repo") as overall_pbar:
                 try:
                     # Submit all mining jobs to the pool
                     for p_name, url in jobs:
@@ -459,11 +460,17 @@ class Repo_miner:
                             tqdm.write(f"💤 {p_name}: No new commits.")
 
                 except KeyboardInterrupt:
-                    # Graceful shutdown on Ctrl+C
+                    # Graceful shutdown on Ctrl+C while manager is still alive
                     tqdm.write("\n🛑 STOPPING MINER! Terminating processes...")
                     stop_event.set()
-                    executor.shutdown(wait=False)
-                    sys.exit(1)
+                    for f in futures:
+                        f.cancel()
+                finally:
+                    # Ensure all outstanding futures are cancelled before manager exits
+                    stop_event.set()
+                    for f in futures:
+                        if not f.done():
+                            f.cancel()
             
         # Create DB indexes after data insertion to ensure fast querying later
         print("[DB] Optimising database indices...")
