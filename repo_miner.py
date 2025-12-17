@@ -323,7 +323,7 @@ class Repo_miner:
             show_activity = os.getenv("SHOW_WORKER_ACTIVITY", "1") != "0"
             if show_activity:
                 worker_id = os.getpid()
-                print(f"[WORKER {worker_id}] ⚙️  Starting {project_name}...", flush=True)
+                tqdm.write(f"[WORKER {worker_id}] ⚙️  Starting {project_name}...")
             
             # --- DUPLICATE PREVENTION ---
             # Retrieve all commit hashes already stored for this project.
@@ -334,7 +334,7 @@ class Repo_miner:
             
             if show_activity:
                 worker_id = os.getpid()
-                print(f"[WORKER {worker_id}] 📥 Cloning {project_name}...", flush=True)
+                tqdm.write(f"[WORKER {worker_id}] 📥 Cloning {project_name}...")
             
             # Initialise the Pydriller Repository object
             repo_miner = Repository(
@@ -400,7 +400,7 @@ class Repo_miner:
             
             if show_activity:
                 worker_id = os.getpid()
-                print(f"[WORKER {worker_id}] ✅ Completed {project_name} ({new_commits_mined} new commits).", flush=True)
+                tqdm.write(f"[WORKER {worker_id}] ✅ Completed {project_name} ({new_commits_mined} new commits).")
         
             return (project_name, new_commits_mined, initial_count, None)
             
