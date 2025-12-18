@@ -41,6 +41,9 @@ Key Features:
 # Make this tunable via env var BATCH_SIZE (default 1000).
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", "1000"))
 
+# Whether to print per-worker activity logs. Default off to avoid progress bar churn; enable with SHOW_WORKER_ACTIVITY=1.
+SHOW_WORKER_ACTIVITY = os.getenv("SHOW_WORKER_ACTIVITY", "0") == "1"
+
 class Repo_miner:
     """
     Main controller class for the repository mining programme.
@@ -179,13 +182,12 @@ class Repo_miner:
             return (project_name, 0, 0, "Skipped: Invalid or missing URL")
 
         try:
-            # Log worker activity by default (disable with SHOW_WORKER_ACTIVITY=0)
-            show_activity = os.getenv("SHOW_WORKER_ACTIVITY", "1") != "0"
-            if show_activity:
+            # Log worker activity only when explicitly enabled to avoid bar flicker in multiprocessing
+            if SHOW_WORKER_ACTIVITY:
                 worker_id = os.getpid()
                 tqdm.write(f"[WORKER {worker_id}] ⚙️  Starting {project_name}...")
             
-            if show_activity:
+            if SHOW_WORKER_ACTIVITY:
                 worker_id = os.getpid()
                 tqdm.write(f"[WORKER {worker_id}] 📥 Cloning {project_name}...")
             
@@ -204,7 +206,7 @@ class Repo_miner:
                 repo_url
             )
             
-            if show_activity:
+            if SHOW_WORKER_ACTIVITY:
                 worker_id = os.getpid()
                 tqdm.write(f"[WORKER {worker_id}] ✅ Completed {project_name} ({new_commits_mined} new commits).")
         
@@ -258,7 +260,7 @@ class Repo_miner:
 
             # tqdm provides a visual progress bar in the console
             with ProcessPoolExecutor(max_workers=max_workers) as executor, \
-                 tqdm(total=total_jobs, desc="TOTAL PROGRESS", unit="repo") as overall_pbar:
+                tqdm(total=total_jobs, desc="TOTAL PROGRESS", unit="repo", position=0, leave=True, dynamic_ncols=True) as overall_pbar:
                 try:
                     # Submit all mining jobs to the pool
                     for p_name, url in jobs:
@@ -280,15 +282,15 @@ class Repo_miner:
                         p_name, added, existing, error = result
                         
                         if error:
-                            tqdm.write(f"❌ {p_name}: {error}")
+                            overall_pbar.write(f"❌ {p_name}: {error}")
                         elif added > 0:
-                            tqdm.write(f"✅ {p_name}: Added {added} rich commits.")
+                            overall_pbar.write(f"✅ {p_name}: Added {added} rich commits.")
                         else:
-                            tqdm.write(f"💤 {p_name}: No new commits.")
+                            overall_pbar.write(f"💤 {p_name}: No new commits.")
 
                 except KeyboardInterrupt:
                     # Graceful shutdown on Ctrl+C while manager is still alive
-                    tqdm.write("\n🛑 STOPPING MINER! Terminating processes...")
+                    overall_pbar.write("\n🛑 STOPPING MINER! Terminating processes...")
                     stop_event.set()
                     for f in futures:
                         f.cancel()

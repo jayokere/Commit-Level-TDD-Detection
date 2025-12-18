@@ -5,3 +5,4 @@ pytest-mock
 python-dotenv
 tqdm
 pymongo[srv]
+urllib3==1.26.18
