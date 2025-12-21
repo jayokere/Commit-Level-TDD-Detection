@@ -197,9 +197,17 @@ def test_run_creates_shards_for_cpp(mock_db, mock_executor):
     # 3. Configure the Executor to return this mock future
     mock_executor.submit.return_value = mock_future
 
+     # 4. Mock first commit from PyDriller
+    fake_commit = MagicMock()
+    fake_commit.author_date = datetime(2000, 1, 1)
+
+    fake_repo = MagicMock()
+    fake_repo.traverse_commits.return_value = [fake_commit]
+
     # 4. Patch 'as_completed' to immediately yield our mock future
     with patch('random.sample', side_effect=lambda pop, k: pop[:k]), \
-         patch('repo_miner.as_completed') as mock_as_completed:
+         patch('repo_miner.as_completed') as mock_as_completed,\
+         patch('repo_miner.Repository', return_value=fake_repo):
 
         # Make as_completed yield a list containing our mock future
         # (This mimics the executor finishing tasks instantly)
@@ -209,7 +217,8 @@ def test_run_creates_shards_for_cpp(mock_db, mock_executor):
         
         # Freezing time logic for assertion
         current_year = datetime.now().year
-        expected_shards = (current_year + 1) - 2000
+        first_year = 2000
+        expected_shards = (current_year + 1) - first_year
         
         # 5. Run the method
         miner.run()
