@@ -6,6 +6,7 @@ Run this without any dependencies to see the algorithm in action.
 
 from unittest.mock import MagicMock
 from repo_miner import Repo_miner
+from miners import TestAnalyser
 
 
 def print_header(title):
@@ -60,7 +61,7 @@ def demo_scenario_1():
     mock_files.append(shapes)
     
     # Analyse
-    coverage = Repo_miner.analyze_test_coverage(mock_files)
+    coverage = TestAnalyser.analyze_test_coverage(mock_files)
     
     print("\n🔍 Analysis Results:")
     print(f"\n  Test Files Identified:")
@@ -117,7 +118,7 @@ def demo_scenario_2():
     util.changed_methods = []
     mock_files.append(util)
     
-    coverage = Repo_miner.analyze_test_coverage(mock_files)
+    coverage = TestAnalyser.analyze_test_coverage(mock_files)
     
     print("\n✨ Tested Files Detected:")
     for tested in coverage['tested_files']:
@@ -161,7 +162,7 @@ def demo_scenario_3():
     processor.changed_methods = []
     mock_files.append(processor)
     
-    coverage = Repo_miner.analyze_test_coverage(mock_files)
+    coverage = TestAnalyser.analyze_test_coverage(mock_files)
     
     print("\n✨ Tested Files Detected:")
     for tested in coverage['tested_files']:
