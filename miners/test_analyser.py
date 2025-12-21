@@ -23,10 +23,23 @@ class TestAnalyser:
         if not filename:
             return False
         
-        lower_filename = filename.lower()
-        # Common test file patterns
-        test_patterns = ['test', 'tests', 'spec', 'specs']
-        return any(pattern in lower_filename for pattern in test_patterns)
+        # Split extension to check the base name
+        base_name, _ = os.path.splitext(os.path.basename(filename))
+        lower_filename = base_name.lower()
+
+        # Categorise test file naming conventions as prefixes or suffixes
+        prefixes = ( 'test_', 'tests_')
+        suffixes = ('test', 'tests', '_test', '_tests', 'spec', '_spec')
+        
+        # Check for the test prefixes or suffixes in the filename
+        if lower_filename.startswith(prefixes) or lower_filename.endswith(suffixes):
+            return True
+        
+        # Check Case-Sensitive 'IT (Integration Test)' Patterns
+        if base_name.endswith('IT'):
+            return True
+
+        return False
     
     @staticmethod
     def extract_tested_files_from_methods(test_methods, all_files):

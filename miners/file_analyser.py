@@ -6,7 +6,7 @@ import os
 
 # Whitelist of file extensions to classify as "Source Code" or "Test Code".
 VALID_CODE_EXTENSIONS = {
-    '.java', '.py', '.cpp', 
+    '.java', '.py', '.cpp', '.cc', 'groovy'
 }
 
 
