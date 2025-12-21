@@ -194,6 +194,7 @@ class Repo_miner:
 
         for p in self.projects:
             raw_url_val = p.get('url')
+            shard_years = list(range(2000, current_year + 2))
 
             # Define the years to shard C++ repos into (from the first commit year to present)
             for c in Repository(raw_url_val, order='reverse').traverse_commits():
@@ -202,9 +203,6 @@ class Repo_miner:
                     first_year = first_commit.author_date.year
                     shard_years = list(range(first_year, current_year + 2))
                     break  # Only need the first commit
-                else:
-                    # If no commits found, default to last 5 years
-                    shard_years = list(range(2000, current_year + 2))
 
             # Robust extraction: Handle cases where 'url' might be a list (from different scrapers)
             if isinstance(raw_url_val, list) and len(raw_url_val) > 0:
