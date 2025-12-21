@@ -3,17 +3,45 @@ import re
 
 from db import get_collection, COMMIT_COLLECTION  # reuse your existing DB connector
 
+
 TEST_PATTERNS = [
+    # --- Generic test directories (language-agnostic) ---
+    re.compile(r"(^|.*/)(test|tests|testing|spec|specs)(/|/.*)", re.IGNORECASE),
+
+    # --- Java / JVM conventions ---
     re.compile(r".*/src/test/.*", re.IGNORECASE),
     re.compile(r".*Test(s|Case)?\.java$", re.IGNORECASE),
     re.compile(r".*IT\.java$", re.IGNORECASE),
+    re.compile(r".*Spec\.java$", re.IGNORECASE),
+
+    # --- Python conventions (pytest/unittest common naming) ---
+    re.compile(r".*/tests/.*\.py$", re.IGNORECASE),
+    re.compile(r".*/test/.*\.py$", re.IGNORECASE),
+    re.compile(r".*/testing/.*\.py$", re.IGNORECASE),
+    re.compile(r"(^|.*/)(test_.*|.*_test)\.py$", re.IGNORECASE),
+
+    # --- C / C++ conventions (common layouts and naming) ---
+    re.compile(r".*/(gtest|googletest|catch2|doctest)(/|/.*)", re.IGNORECASE),
+    re.compile(r"(^|.*/)(test_.*|.*_test)\.(c|cc|cpp|cxx|h|hpp|hh|hxx)$", re.IGNORECASE),
+]
+
+# Optional: exclude known non-test directories that contain "test" as substring.
+# (Keep conservative; false negatives are worse than false positives for adoption rate.)
+EXCLUDE_PATTERNS = [
+    re.compile(r".*/contest/.*", re.IGNORECASE),
 ]
 
 def is_test_path(path: str) -> bool:
     if not path:
         return False
+
     p = path.replace("\\", "/")
+
+    if any(rx.match(p) for rx in EXCLUDE_PATTERNS):
+        return False
+
     return any(rx.match(p) for rx in TEST_PATTERNS)
+
 
 def extract_paths(modified_files):
     """
