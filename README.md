@@ -41,7 +41,7 @@ Currently, this application connects to the Apache Software Foundation's public 
     source venv/bin/activate
 
     # Windows
-    python -m venv venv
+    py -m venv venv
     venv\Scripts\activate   # command prompt
     venv\Scripts\Activate.ps1 # PowerShell
     ```

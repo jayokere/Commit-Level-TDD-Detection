@@ -4,6 +4,7 @@ from multiprocessing import Manager
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 from pydriller import Repository
+from urllib.parse import urlparse
 import random
 from datetime import datetime
 import requests
@@ -130,7 +131,7 @@ class Repo_miner:
         current_year = datetime.now().year
         
         name = project.get('name')
-        raw_url = project.get('repo_url') or project.get('repo_url')
+        raw_url = project.get('repo_url') or project.get('url')
         language = project.get('language')
 
         if isinstance(raw_url, list) and len(raw_url) > 0:
@@ -144,9 +145,16 @@ class Repo_miner:
         
         # LOGIC: If C++, use GitHub API to get the real start year without cloning
         if language == 'C++':
+
             try:
-                # Convert raw URL to API URL
-                if "github.com" in raw_url:
+                if not raw_url:
+                    return []
+            
+                parsed_url = urlparse(raw_url)
+                # Check if the hostname (domain) is exactly github.com (optionally allowing www.github.com)
+                hostname = parsed_url.hostname.lower() if parsed_url.hostname else None
+                if hostname in ("github.com", "www.github.com"):
+                    # Convert raw URL to API URL
                     parts = raw_url.strip("/").split("/")
                     if len(parts) >= 2:
                         owner, repo = parts[-2], parts[-1]
@@ -340,10 +348,6 @@ class Repo_miner:
                     print("\n\n🛑 STOPPING MINER! Terminating processes...")
                     stop_event.set()
                     for f in futures: f.cancel()
-                finally:
-                    stop_event.set()
-                    for f in futures:
-                        if not f.done(): f.cancel()
             
             # Stop monitor if not already stopped
             if monitor.running:
