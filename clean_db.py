@@ -10,21 +10,21 @@ def clean_duplicates():
     """
     col = get_collection(COMMIT_COLLECTION)
     
-    print("Analyzing database for duplicate commits...")
+    print("Analysing database for duplicate commits...")
     
-    # 1. Aggregation Pipeline to find duplicates
-    # Group by project and hash, then count them.
+    # Aggregation Pipeline to find duplicates
+    # Grouped by project and hash, then count them.
     pipeline = [
         {
             "$group": {
                 "_id": {"project": "$project", "hash": "$hash"},
                 "count": {"$sum": 1},
-                "ids": {"$push": "$_id"} # Store the _ids of the duplicates
+                "ids": {"$push": "$_id"} # Stores the _ids of the duplicates
             }
         },
         {
             "$match": {
-                "count": {"$gt": 1} # Only keep groups with more than 1 document
+                "count": {"$gt": 1} # Only keeps groups with more than 1 document
             }
         }
     ]
@@ -41,7 +41,7 @@ def clean_duplicates():
     bulk_ops = []
     removed_count = 0
     
-    # 2. Iterate and Prepare Delete Operations
+    # Iterate and Prepare Delete Operations
     for group in tqdm(duplicates, desc="Processing duplicates"):
         # We have a list of _ids. We keep the first one and delete the rest.
         # Ideally, we might want to keep the one with the most info, 
@@ -63,8 +63,11 @@ def clean_duplicates():
         
     print(f"\n✅ Cleanup complete. Removed {removed_count} duplicate documents.")
 
+def run():
+    clean_duplicates()
+
 if __name__ == "__main__":
-    confirm = input("This will scan and delete duplicate commits from your DB. Type 'clean' to proceed: ")
+    confirm = input("Are you sure you want to scan and delete duplicate commits from your DB. Type 'clean' to proceed: ")
     if confirm.lower() == "clean":
         clean_duplicates()
     else:

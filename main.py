@@ -4,6 +4,7 @@ from pydriller import Repository
 # Internal Modules
 import miner_intro
 import apache_miner
+import clean_db
 from db import get_collection
 from utils import measure_time
 from repo_miner import Repo_miner 
@@ -20,7 +21,11 @@ def main() -> None:
     project_count = get_collection("mined-repos").count_documents({})
     print(f"\nReady to process {project_count} projects...")
 
+    # Run Repository Miner
     Repo_miner().run()
+
+    # Clean duplicate commits from Database
+    clean_db.run()
 
 if __name__ == "__main__":
     main()
