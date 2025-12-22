@@ -10,7 +10,7 @@ load_dotenv(find_dotenv())
 # Constants
 DB_NAME = "mined-data"
 REPO_COLLECTION = "mined-repos"
-COMMIT_COLLECTION = "mined-commits"
+COMMIT_COLLECTION = "mined-commits-temp"
 
 # Module-level, per-process Mongo client (reused across calls)
 _CLIENT = None

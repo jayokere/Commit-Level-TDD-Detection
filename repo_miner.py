@@ -1,11 +1,12 @@
 import os
 import sys
 from multiprocessing import Manager
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 from pydriller import Repository
 import random
 from datetime import datetime
+import requests
 
 # Internal Modules
 from utils import measure_time
@@ -17,6 +18,7 @@ from db import (
     get_all_mined_project_names 
 )
 from miners import FileAnalyser, TestAnalyser, CommitProcessor
+from miner_intro import ProgressMonitor
 
 """
 repo_miner.py
@@ -117,6 +119,71 @@ class Repo_miner:
         if "github.com:" in url and "github.com:443" not in url:
             url = url.replace("github.com:", "github.com/")
         return url
+    
+    @staticmethod
+    def _prepare_job(project):
+        """
+        Helper function to calculate shards for a single project.
+        OPTIMISED: Uses GitHub API to find start year instantly (no cloning).
+        """
+        jobs = []
+        current_year = datetime.now().year
+        
+        name = project.get('name')
+        raw_url = project.get('url')
+        language = project.get('language')
+
+        if isinstance(raw_url, list) and len(raw_url) > 0:
+            raw_url = raw_url[0]
+        
+        if not (isinstance(raw_url, str) and raw_url):
+            return []
+
+        # Default fallback
+        start_year = 2000
+        
+        # LOGIC: If C++, use GitHub API to get the real start year without cloning
+        if language == 'C++':
+            try:
+                # Convert raw URL to API URL
+                if "github.com" in raw_url:
+                    parts = raw_url.strip("/").split("/")
+                    if len(parts) >= 2:
+                        owner, repo = parts[-2], parts[-1]
+                        api_url = f"https://api.github.com/repos/{owner}/{repo}"
+                        
+                        # Get token from environment variables
+                        token = os.getenv('GITHUB_TOKEN') 
+                        headers = {}
+                        if token:
+                            headers['Authorization'] = f'token {token}'
+
+                        # Makes a lightweight API call (Time: ~0.5s)
+                        response = requests.get(api_url, headers=headers, timeout=5)
+                        
+                        if response.status_code == 200:
+                            data = response.json()
+                            created_at = data.get("created_at") # Format: "2016-02-17T15:47:32Z"
+                            if created_at:
+                                start_year = int(created_at[:4])
+            except Exception:
+                # If API fails (rate limit or network), fail silently and use default 2000
+                print(f"⚠️ Warning: Could not fetch creation date for {name}. Using default start year {start_year}.")
+                pass
+
+            # Create the shards based on the year found
+            shard_years = list(range(start_year, current_year + 2))
+
+            for i in range(len(shard_years) - 1):
+                s_date = datetime(shard_years[i], 1, 1)
+                e_date = datetime(shard_years[i+1], 1, 1)
+                if s_date > datetime.now(): break
+                jobs.append((name, raw_url, s_date, e_date))
+        else:
+            # Non-C++ projects don't need sharding
+            jobs.append((name, raw_url, None, None))
+            
+        return jobs
 
     @staticmethod
     def mine_repo(args):
@@ -185,111 +252,104 @@ class Repo_miner:
     @measure_time
     def run(self):
         """
-        Configures the multiprocessing pool and manages the lifecycle of the mining operation.
+        Main execution flow using custom 'miner_intro' progress bars.
         """
-        # Prepare the jobs list, ensuring URLs are correctly formatted strings
         jobs = []
+        total_projects = len(self.projects)
+
+        # --- PHASE 1: PREPARATION (Multithreaded) ---
+        print(f"[INFO] Analysing {total_projects} repositories to determine shard dates...\n")
         
-        current_year = datetime.now().year
+        monitor = ProgressMonitor(total_projects, label="PREPARING SHARDS")
+        monitor.start()
 
-        for p in self.projects:
-            raw_url_val = p.get('url')
-            shard_years = list(range(2000, current_year + 2))
-
-            # Define the years to shard C++ repos into (from the first commit year to present)
-            for c in Repository(raw_url_val, order='reverse').traverse_commits():
-                if c:
-                    first_commit = c
-                    first_year = first_commit.author_date.year
-                    shard_years = list(range(first_year, current_year + 2))
-                    break  # Only need the first commit
-
-            # Robust extraction: Handle cases where 'url' might be a list (from different scrapers)
-            if isinstance(raw_url_val, list) and len(raw_url_val) > 0:
-                raw_url_val = raw_url_val[0]
+        # Use ThreadPoolExecutor for I/O bound date checking
+        with ThreadPoolExecutor(max_workers=20) as preparer:
+            future_to_project = {preparer.submit(self._prepare_job, p): p for p in self.projects}
             
-            if not (isinstance(raw_url_val, str) and raw_url_val):
-                continue
+            completed_prep = 0
+            
+            # Process results as they come in
+            for future in as_completed(future_to_project):
+                try:
+                    result_jobs = future.result()
+                    jobs.extend(result_jobs)
+                except Exception as exc:
+                    print(f"\n[WARN] Exception during preparation: {exc}")
                 
-            # LOGIC: If C++, split into 1-year chunks. If others, run as one block.
-            # You can add 'or p.get("commits", 0) > 5000' if you want to shard large Java repos too.
-            if p.get('language') == 'C++':
-                for i in range(len(shard_years) - 1):
-                    s_date = datetime(shard_years[i], 1, 1)
-                    e_date = datetime(shard_years[i+1], 1, 1)
-                    
-                    # Stop creating future shards
-                    if s_date > datetime.now(): break
-                    
-                    # Append Sharded Job
-                    jobs.append((p['name'], raw_url_val, s_date, e_date))
-            else:
-                # Append Single Job (Dates = None)
-                jobs.append((p['name'], raw_url_val, None, None))
+                # Update Custom Progress Bar
+                completed_prep += 1
+                monitor.update(completed_prep)
+
+        monitor.stop()
 
         if not jobs:
             print("No new projects found to mine (Quotas may be full).")
             return
 
+        # --- PHASE 2: MINING (Multiprocessing) ---
         total_jobs = len(jobs)
-        print(f"[INFO] Starting parallel mining. Work split into {total_jobs} segments.")
+        print(f"\n[INFO] Preparation complete. Starting parallel mining with {total_jobs} segments.")
         
-        # Determine number of workers based on available CPU cores.
-        # Allow overriding via MAX_WORKERS env var to cap concurrency for large repos.
         env_max = os.getenv("MAX_WORKERS")
         if env_max and env_max.isdigit():
             max_workers = int(env_max)
         else:
-            # Default: modest oversubscription to hide I/O latency on small repos
             max_workers = (os.cpu_count() or 6) * 2
         max_workers = max(1, min(total_jobs, max_workers))
         
-        print(f"[INFO] Using {max_workers} worker processes")
+        print(f"[INFO] Using {max_workers} worker processes\n")
+
+        monitor = ProgressMonitor(total_jobs, label="MINING PROGRESS")
+        monitor.start()
         
-        # 'Manager' creates a shared state (Event) to allow synchronised stopping across processes
         with Manager() as manager:
             stop_event = manager.Event()
             futures = []
 
-            # tqdm provides a visual progress bar in the console
-            with ProcessPoolExecutor(max_workers=max_workers) as executor, \
-                tqdm(total=total_jobs, desc="SHARDS PROGRESS", unit="shard") as overall_pbar:
+            with ProcessPoolExecutor(max_workers=max_workers) as executor:
                 try:
-                    # Submit all mining jobs to the pool
+                    # Submit all jobs
                     for p_name, url, start, end in jobs:
                         futures.append(executor.submit(
                             self.mine_repo, 
                             (p_name, url, start, end, stop_event)
                         ))
 
-                    # Process results as they complete (as_completed)
+                    completed_mining = 0
+                    
+                    # Track progress
                     for future in as_completed(futures):
                         result = future.result()
-                        overall_pbar.update(1)
 
                         if result is None: continue
 
-                        # Unpack results for logging
                         p_name, added, existing, error = result
                         
-                        # Only print errors or significant updates to avoid clutter
-                        if error:
-                            overall_pbar.write(f"❌ {p_name}: {error}")
-                        # Note: We don't print "Success" here for every shard to keep console clean,
-                        # rely on SHOW_WORKER_ACTIVITY for detailed logs.
+                        if added > 0:
+                            monitor.log(f"✅ {p_name}: {added} new commits mined.")
+                        
+                        if error and "No commits found" not in str(error):
+                            monitor.log(f"❌ {p_name}: {error}")
+                        
+                        completed_mining += 1
+                        monitor.update(completed_mining)
 
                 except KeyboardInterrupt:
-                    # Graceful shutdown on Ctrl+C while manager is still alive
-                    overall_pbar.write("\n🛑 STOPPING MINER! Terminating processes...")
+                    monitor.stop()
+                    print("\n\n🛑 STOPPING MINER! Terminating processes...")
                     stop_event.set()
                     for f in futures: f.cancel()
                 finally:
-                    # Ensure all outstanding futures are cancelled before manager exits
                     stop_event.set()
                     for f in futures:
                         if not f.done(): f.cancel()
             
-        # Create DB indexes after data insertion to ensure fast querying later
+            # Stop monitor if not already stopped
+            if monitor.running:
+                monitor.stop()
+        
+        print("\n") 
         print("[DB] Optimising database indices...")
         ensure_indexes()
         print("[SUCCESS] Cycle complete.")
