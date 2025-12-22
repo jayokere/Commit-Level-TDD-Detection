@@ -151,8 +151,9 @@ class Repo_miner:
                     return []
             
                 parsed_url = urlparse(raw_url)
-                # Check if the hostname (domain) is github.com
-                if parsed_url.hostname and "github.com" in parsed_url.hostname.lower():
+                # Check if the hostname (domain) is exactly github.com (optionally allowing www.github.com)
+                hostname = parsed_url.hostname.lower() if parsed_url.hostname else None
+                if hostname in ("github.com", "www.github.com"):
                     # Convert raw URL to API URL
                     parts = raw_url.strip("/").split("/")
                     if len(parts) >= 2:
