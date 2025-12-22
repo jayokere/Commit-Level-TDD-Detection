@@ -130,7 +130,7 @@ class Repo_miner:
         current_year = datetime.now().year
         
         name = project.get('name')
-        raw_url = project.get('url')
+        raw_url = project.get('repo_url') or project.get('repo_url')
         language = project.get('language')
 
         if isinstance(raw_url, list) and len(raw_url) > 0:
