@@ -11,7 +11,8 @@ load_dotenv(find_dotenv())
 
 # Constants
 DB_NAME = "mined-data"
-REPO_COLLECTION = "mined-repos"
+APACHE_REPO_COLLECTION = "apache-repos"
+MINED_REPOS_COLLECTION = "mined-repos"
 COMMIT_COLLECTION = "mined-commits"
 
 # Module-level, per-process Mongo client (reused across calls)
@@ -19,9 +20,9 @@ _CLIENT = None
 # Flag to ensure we only ask the user once per run
 _CHOICE_MADE = False
 
-def get_db_connection():
-    """Establishes (or reuses) a per-process connection to the database."""
-    global _CLIENT, _CHOICE_MADE
+def ask_user():
+    """Prompts the user to select the database connection mode."""
+    global _CHOICE_MADE
 
     if not _CHOICE_MADE and sys.stdin.isatty() and not os.getenv("DB_MODE_SELECTED"):
         print("\n" + "="*50)
@@ -50,6 +51,13 @@ def get_db_connection():
         os.environ["DB_MODE_SELECTED"] = "True"
         _CHOICE_MADE = True
         print("-" * 50 + "\n")
+
+def get_db_connection():
+    """Establishes (or reuses) a per-process connection to the database."""
+    global _CLIENT, _CHOICE_MADE
+
+    if not _CHOICE_MADE:
+        ask_user()
 
     # ---------------------------------------------------------
     # CONNECTION LOGIC
@@ -91,7 +99,7 @@ def get_collection(collection_name):
 # Data Access Objects (DAO) - Repo Management
 # -------------------------------------------------------------------------
 
-def get_existing_repo_urls(collection_name: str = REPO_COLLECTION) -> Set[str]:
+def get_existing_repo_urls(collection_name: str = APACHE_REPO_COLLECTION) -> Set[str]:
     """
     Returns a Set of repository URLs that are already stored in the DB.
     This is used to skip mining repos we already have.
@@ -101,7 +109,7 @@ def get_existing_repo_urls(collection_name: str = REPO_COLLECTION) -> Set[str]:
     cursor = col.find({}, {'repo_url': 1, '_id': 0})
     return {doc['repo_url'] for doc in cursor if 'repo_url' in doc}
 
-def save_repo_batch(repos: List[Dict], collection_name: str = REPO_COLLECTION):
+def save_repo_batch(repos: List[Dict], collection_name: str = APACHE_REPO_COLLECTION):
     """
     Performs a bulk upsert (update or insert) for a list of repository dictionaries.
     Using bulk_write is much faster than inserting one by one.
@@ -138,34 +146,34 @@ def save_repo_batch(repos: List[Dict], collection_name: str = REPO_COLLECTION):
 
 def get_projects_to_mine():
     """
-    Fetches the list of projects from 'mined-repos', sorted by commit count (Smallest first).
+    Fetches the list of projects from 'mined-repos', sorted by commit count (Largest first).
     """
-    col = get_collection(REPO_COLLECTION)
-    cursor = col.find().sort("commit_count", ASCENDING)
+    col = get_collection(APACHE_REPO_COLLECTION)
+    cursor = col.find().sort("commit_count", DESCENDING)
     return list(cursor)
 
 def get_java_projects_to_mine():
     """
-    Fetches the list of projects from 'mined-repos', sorted by commit count (Smallest first).
+    Fetches the list of projects from 'mined-repos', sorted by commit count (Largest first).
     """
-    col = get_collection(REPO_COLLECTION)
-    cursor = col.find({"language":"Java"}).sort("commit_count", ASCENDING)
+    col = get_collection(APACHE_REPO_COLLECTION)
+    cursor = col.find({"language":"Java"}).sort("commit_count", DESCENDING)
     return list(cursor)  
 
 def get_python_projects_to_mine():
     """
-    Fetches the list of projects from 'mined-repos', sorted by commit count (Smallest first).
+    Fetches the list of projects from 'mined-repos', sorted by commit count (Largest first).
     """
-    col = get_collection(REPO_COLLECTION)
-    cursor = col.find({"language":"Python"}).sort("commit_count", ASCENDING)
+    col = get_collection(APACHE_REPO_COLLECTION)
+    cursor = col.find({"language":"Python"}).sort("commit_count", DESCENDING)
     return list(cursor)   
 
 def get_cpp_projects_to_mine():
     """
-    Fetches the list of projects from 'mined-repos', sorted by commit count (Smallest first).
+    Fetches the list of projects from 'mined-repos', sorted by commit count (Largest first).
     """
-    col = get_collection(REPO_COLLECTION)
-    cursor = col.find({"language":"C++"}).sort("commit_count", ASCENDING)
+    col = get_collection(APACHE_REPO_COLLECTION)
+    cursor = col.find({"language":"C++"}).sort("commit_count", DESCENDING)
     return list(cursor) 
 def get_existing_commit_hashes(project_name):
     """
@@ -235,12 +243,12 @@ def get_project(project_name):
     """
     Fetches a single project document by name.
     """
-    col = get_collection(REPO_COLLECTION)
+    col = get_collection(APACHE_REPO_COLLECTION)
     return col.find_one({"name": project_name})
 
 def update_project(project_name, updates: Dict):
     """
     Updates fields of a project document.
     """
-    col = get_collection(REPO_COLLECTION)
+    col = get_collection(APACHE_REPO_COLLECTION)
     col.update_one({"name": project_name}, {"$set": updates})

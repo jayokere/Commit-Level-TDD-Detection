@@ -80,7 +80,8 @@ def num_source_files(project_name):
     Returns the total number of source files for a project using GitHub API.
     """
     repo = get_project(project_name)
-    return count_files_github(repo['repo_url'])
+    if repo:
+        return count_files_github(repo['repo_url'])
 
 
 if __name__ == "__main__":
@@ -91,6 +92,14 @@ if __name__ == "__main__":
         try:
             n = num_source_files(project)
             new_project = get_project(project)
+
+            if not new_project:
+                print(f"Project: {project} not found in DB, skipping.")
+                continue
+            if not n:
+                print(f"Project: {project} has no source files found, skipping.")
+                continue
+
             new_project['num_production_files'] = n[0]
             new_project['num_test_files'] = n[1]
             new_project['num_source_files'] = n[2]

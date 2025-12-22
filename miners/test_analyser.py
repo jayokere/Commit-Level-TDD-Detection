@@ -121,7 +121,7 @@ class TestAnalyser:
         return list(tested_files)
     
     @staticmethod
-    def analyze_test_coverage(modified_files):
+    def map_test_relations(modified_files):
         """
         Analyzes a commit to determine which files are tests and which are being tested.
         

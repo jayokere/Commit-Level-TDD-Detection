@@ -53,7 +53,7 @@ class TestFileDetectionScenarios:
         mock_files.append(shapes)
         
         # Run the analysis
-        coverage = TestAnalyser.analyze_test_coverage(mock_files)
+        coverage = TestAnalyser.map_test_relations(mock_files)
         
         # Verify results
         print("\n=== Scenario: shapes_test.py testing multiple files ===")
@@ -102,7 +102,7 @@ class TestFileDetectionScenarios:
         util.changed_methods = []
         mock_files.append(util)
         
-        coverage = TestAnalyser.analyze_test_coverage(mock_files)
+        coverage = TestAnalyser.map_test_relations(mock_files)
         
         print("\n=== Scenario: Java-style camelCase naming ===")
         print(f"Test files: {[f['filename'] for f in coverage['test_files']]}")
@@ -133,7 +133,7 @@ class TestFileDetectionScenarios:
         processor.changed_methods = []
         mock_files.append(processor)
         
-        coverage = TestAnalyser.analyze_test_coverage(mock_files)
+        coverage = TestAnalyser.map_test_relations(mock_files)
         
         print("\n=== Scenario: Python snake_case naming ===")
         print(f"Test files: {[f['filename'] for f in coverage['test_files']]}")
@@ -169,7 +169,7 @@ class TestFileDetectionScenarios:
         service.changed_methods = []
         mock_files.append(service)
         
-        coverage = TestAnalyser.analyze_test_coverage(mock_files)
+        coverage = TestAnalyser.map_test_relations(mock_files)
         
         print("\n=== Scenario: Multiple test files for one source ===")
         print(f"Test files: {[f['filename'] for f in coverage['test_files']]}")
@@ -202,7 +202,7 @@ class TestFileDetectionScenarios:
         button.changed_methods = []
         mock_files.append(button)
         
-        coverage = TestAnalyser.analyze_test_coverage(mock_files)
+        coverage = TestAnalyser.map_test_relations(mock_files)
         
         print("\n=== Scenario: Spec-style naming ===")
         print(f"Test files: {[f['filename'] for f in coverage['test_files']]}")
@@ -232,7 +232,7 @@ class TestFileDetectionScenarios:
         bar.changed_methods = []
         mock_files.append(bar)
         
-        coverage = TestAnalyser.analyze_test_coverage(mock_files)
+        coverage = TestAnalyser.map_test_relations(mock_files)
         
         print("\n=== Scenario: No matching source files ===")
         print(f"Test files: {[f['filename'] for f in coverage['test_files']]}")
@@ -263,7 +263,7 @@ class TestFileDetectionScenarios:
         a_file.changed_methods = []
         mock_files.append(a_file)
         
-        coverage = TestAnalyser.analyze_test_coverage(mock_files)
+        coverage = TestAnalyser.map_test_relations(mock_files)
         
         print("\n=== Edge Case: Very short names ===")
         print(f"Tested files: {coverage['tested_files']}")

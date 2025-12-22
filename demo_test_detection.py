@@ -61,7 +61,7 @@ def demo_scenario_1():
     mock_files.append(shapes)
     
     # Analyse
-    coverage = TestAnalyser.analyze_test_coverage(mock_files)
+    coverage = TestAnalyser.map_test_relations(mock_files)
     
     print("\n🔍 Analysis Results:")
     print(f"\n  Test Files Identified:")
@@ -118,7 +118,7 @@ def demo_scenario_2():
     util.changed_methods = []
     mock_files.append(util)
     
-    coverage = TestAnalyser.analyze_test_coverage(mock_files)
+    coverage = TestAnalyser.map_test_relations(mock_files)
     
     print("\n✨ Tested Files Detected:")
     for tested in coverage['tested_files']:
@@ -162,7 +162,7 @@ def demo_scenario_3():
     processor.changed_methods = []
     mock_files.append(processor)
     
-    coverage = TestAnalyser.analyze_test_coverage(mock_files)
+    coverage = TestAnalyser.map_test_relations(mock_files)
     
     print("\n✨ Tested Files Detected:")
     for tested in coverage['tested_files']:
