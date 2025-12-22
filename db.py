@@ -189,3 +189,17 @@ def get_all_mined_project_names():
     col = get_collection(COMMIT_COLLECTION)
     # .distinct() is very efficient for getting unique values
     return set(col.distinct("project"))
+
+def get_project(project_name):
+    """
+    Fetches a single project document by name.
+    """
+    col = get_collection(REPO_COLLECTION)
+    return col.find_one({"name": project_name})
+
+def update_project(project_name, updates: Dict):
+    """
+    Updates fields of a project document.
+    """
+    col = get_collection(REPO_COLLECTION)
+    col.update_one({"name": project_name}, {"$set": updates})
