@@ -305,6 +305,7 @@ def main() -> None:
     analysis.log_final_analysis_results()
     analysis.print_output_log()
     analysis.write_output_log()
+    print(f"Analysis Complete! Check the analysis-output folder.")
 
 if __name__ == "__main__":
     main()
