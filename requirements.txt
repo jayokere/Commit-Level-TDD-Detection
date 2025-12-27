@@ -6,3 +6,5 @@ python-dotenv
 tqdm
 pymongo
 urllib3==1.26.18
+matplotlib
+pandas
