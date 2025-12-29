@@ -193,7 +193,7 @@ class TestApacheGitHubMiner(unittest.TestCase):
         
         # Check that we SAVED to the DB.
         # Ensure 'mock_db' is available in your test class scope or imported
-        mock_db.save_repo_batch.assert_called_once_with([processed_result], "mined-repos")
+        mock_db.save_repo_batch.assert_called_once_with([processed_result], "apache-repos")
         
 if __name__ == '__main__':
     unittest.main()
