@@ -6,6 +6,7 @@ from db import get_collection, COMMIT_COLLECTION, REPO_COLLECTION
 from bson.json_util import dumps
 from typing import List, Dict, Any, Optional
 import os
+import re
 import argparse
 from datetime import datetime
 import math
@@ -293,31 +294,57 @@ class Static_Analysis:
         return source_filenames
 
     def _is_related_file(self, test_file: str, source_file: str) -> bool:
-        """Check if a test file is related to a source file based on naming conventions."""
-        # Remove path and extension for comparison
-        test_name = test_file.split("/")[-1].split(".")[0].lower()
-        source_name = source_file.split("/")[-1].split(".")[0].lower()
+        """
+        Check if a test file is related to a source file based on naming conventions.
+        Uses logic adapted from TestAnalyser to handle prefixes, suffixes, and components.
+        """
+        # 1. Normalise names by removing path and extension
+        test_base = os.path.splitext(os.path.basename(test_file))[0]
+        source_base = os.path.splitext(os.path.basename(source_file))[0]
+        
+        test_lower = test_base.lower()
+        source_lower = source_base.lower()
 
-        # Check common patterns: TestFoo <-> Foo, FooTest <-> Foo, FooTestCase <-> Foo
-        test_patterns = [
-            test_name.replace("test", ""),
-            test_name.replace("testcase", ""),
-            test_name.replace("spec", ""),
-        ]
+        # 2. Define the cleaning patterns used in TestAnalyser
+        prefixes = ['test_', 'test', 'tests_', 'tests', 'should_', 'should', 'when_', 'when']
+        suffixes = ['_test', 'test', '_tests', 'tests', '_spec', 'spec', 'testcase']
 
-        source_patterns = [
-            source_name,
-            "test" + source_name,
-            source_name + "test",
-            source_name + "testcase",
-            "spec" + source_name,
-            source_name + "spec",
-        ]
+        # 3. Clean the test name to find the "core" component
+        cleaned_test = test_lower
+        for prefix in prefixes:
+            if cleaned_test.startswith(prefix):
+                cleaned_test = cleaned_test[len(prefix):]
+                break
+        for suffix in suffixes:
+            if cleaned_test.endswith(suffix):
+                cleaned_test = cleaned_test[:-len(suffix)]
+                break
+        
+        # Strip any remaining underscores after prefix/suffix removal
+        cleaned_test = cleaned_test.strip('_')
 
-        # Check if any test pattern matches any source pattern
-        for test_p in test_patterns:
-            if test_p and test_p in source_patterns:
-                return True
+        # 4. Direct Match Check
+        # If the core test name matches the source name (e.g., 'calculator' == 'calculator')
+        if cleaned_test == source_lower or source_lower == cleaned_test:
+            return True
+
+        # 5. Component/Sub-string Matching (Logic from extract_tested_files_from_methods)
+        # Split by underscores
+        test_parts = set(cleaned_test.split('_'))
+        
+        # Handle camelCase splitting for the test name
+        camel_parts = re.findall(r'[A-Z]?[a-z]+|[A-Z]+(?=[A-Z][a-z]|\d|\W|$)|\d+', test_base)
+        test_parts.update([p.lower() for p in camel_parts if len(p) > 2])
+
+        # Check if any significant component of the test name matches the source file
+        for part in test_parts:
+            if part and len(part) > 2:
+                if part in source_lower or source_lower in part:
+                    return True
+
+        # 6. Special Case: Integration Tests (IT)
+        if test_base.endswith('IT') and test_base[:-2].lower() in source_lower:
+            return True
 
         return False
 
