@@ -13,6 +13,7 @@ import math
 
 STATIC_ANALYSIS_OUTPUT_FILE = "analysis-output/{}_static_analysis.txt"
 SAMPLE_COUNT = 60
+HIGH_TDD_THRESHOLD = 50
 JAVA = "Java"
 PYTHON = "Python"
 CPP = "C++"
@@ -44,7 +45,8 @@ class Static_Analysis:
         self._language = language
         self._isVerbose = False
         self.output_log = ""
-        self._projects_with_tdd_detected_count = 0
+        self._projects_with_tdd_detected_count = 0 # Projects with > 0% TDD
+        self._high_tdd_projects_count = 0 # Projects with > 20% TDD
         self._tdd_adoption_rate_list = []
         self._write_to_db = write_to_db
         self._total_tdd_commits_count = 0  # Global count of TDD patterns
@@ -52,6 +54,7 @@ class Static_Analysis:
 
     def analyze(self):
         """Analyze commits for TDD patterns within the same commit or across consecutive commits."""
+        all_project_names = self._get_project_names()
         project_names = self._get_project_names()
         project_count = len(project_names)
         count = 0
@@ -67,6 +70,7 @@ class Static_Analysis:
                 continue
 
             tdd_patterns = self.detect_tdd_in_commits(commits)
+            num_tdd_commits = len(tdd_patterns)
 
             # Increment global counters
             self._total_tdd_commits_count += len(tdd_patterns)
@@ -76,16 +80,22 @@ class Static_Analysis:
             self.output_log += f"Total commits in project \"{name}\": {total_commits}\n"
             self.output_log += f"Detected TDD patterns ({len(tdd_patterns)} total):\n"
 
-            percentage = (len(tdd_patterns) / total_commits * 100) if total_commits > 0 else 0
+            percentage = (num_tdd_commits / total_commits * 100) if total_commits > 0 else 0
             self.output_log += f"TDD pattern percentage: {percentage:.2f}% ({len(tdd_patterns)}/{total_commits})\n"
 
             # ALWAYS append the percentage, even if it is 0.0
             self._tdd_adoption_rate_list.append(percentage)
-
+            
+            # Check for any TDD detected
             if tdd_patterns:
                 self._projects_with_tdd_detected_count += 1
                 self.output_log += f"TDD detected in project \"{name}\". Detection count set to {self._projects_with_tdd_detected_count}.\n"
                 #self._tdd_adoption_rate_list.append(percentage)
+
+            # Check for high TDD adoption (>20%)
+            if percentage > HIGH_TDD_THRESHOLD:
+                self._high_tdd_projects_count += 1
+                self.output_log += f"High TDD adoption (>20%) detected in project \"{name}\". High TDD project count set to {self._high_tdd_projects_count}.\n"
 
             for pattern in tdd_patterns:
                 self.log_if_verbose(f"{dumps(pattern, indent=2)}\n")
@@ -404,15 +414,21 @@ class Static_Analysis:
         # Formula: $\frac{\text{Total TDD Commits}}{\text{Total Commits}} \times 100$
         overall_language_rate = (self._total_tdd_commits_count / self._total_commits_analysed_count * 100) if self._total_commits_analysed_count > 0 else 0
 
-        project_detection_rate = (self._projects_with_tdd_detected_count / num_projects_processed * 100) if num_projects_processed > 0 else 0
+        # Percentage of projects with > 0% TDD
+        any_tdd_rate = (self._projects_with_tdd_detected_count / num_projects_processed * 100) if num_projects_processed > 0 else 0
+        
+        # Percentage of projects with > 20% TDD
+        high_tdd_rate = (self._high_tdd_projects_count / num_projects_processed * 100) if num_projects_processed > 0 else 0
 
         self.output_log += f"\n" + "="*30 + " FINAL RESULTS " + "="*30 + "\n"
         self.output_log += f"Language: {self._language}\n"
         self.output_log += f"Projects Processed: {num_projects_processed} (Sample Cap: {SAMPLE_COUNT})\n"
-        self.output_log += f"Projects with TDD Patterns Detected: {self._projects_with_tdd_detected_count} ({project_detection_rate:.2f}%)\n"
         self.output_log += "-"*75 + "\n"
         self.output_log += f"Total Commits across all projects: {self._total_commits_analysed_count}\n"
         self.output_log += f"Total TDD Commits identified: {self._total_tdd_commits_count}\n"
+        self.output_log += "-"*75 + "\n"
+        self.output_log += f"Projects with ANY TDD detected (>0%): {self._projects_with_tdd_detected_count} ({any_tdd_rate:.2f}%)\n"
+        self.output_log += f"Projects with TDD adoption > {HIGH_TDD_THRESHOLD}%: {self._high_tdd_projects_count} ({high_tdd_rate:.2f}%)\n"
         self.output_log += "-"*75 + "\n"
         self.output_log += f"Average TDD Adoption Rate (Mean of project %): {avg_adoption_rate:.2f}%\n"
         self.output_log += f"Overall Language Adoption Rate (Total TDD / Total Commits): {overall_language_rate:.2f}%\n"
