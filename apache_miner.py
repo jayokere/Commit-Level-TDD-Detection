@@ -25,7 +25,7 @@ except ImportError:
 # Constants
 TARGET_ORG = "apache"
 TARGET_LANGUAGES = {"Java", "Python", "C++"}
-COLLECTION_NAME = "mined-repos"
+COLLECTION_NAME = "apache-repos"
 
 class RateLimitExceededError(Exception):
     pass
