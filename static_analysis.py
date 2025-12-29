@@ -47,6 +47,8 @@ class Static_Analysis:
         self._projects_with_tdd_detected_count = 0
         self._tdd_adoption_rate_list = []
         self._write_to_db = write_to_db
+        self._total_tdd_commits_count = 0  # Global count of TDD patterns
+        self._total_commits_analysed_count = 0  # Global count of all commits in projects
 
     def analyze(self):
         """Analyze commits for TDD patterns within the same commit or across consecutive commits."""
@@ -65,6 +67,10 @@ class Static_Analysis:
                 continue
 
             tdd_patterns = self.detect_tdd_in_commits(commits)
+
+            # Increment global counters
+            self._total_tdd_commits_count += len(tdd_patterns)
+            self._total_commits_analysed_count += total_commits
 
             self.output_log += f"\n{i}-{count}.) Checking TDD patters for project with name \"{name}\"\n"
             self.output_log += f"Total commits in project \"{name}\": {total_commits}\n"
@@ -387,14 +393,40 @@ class Static_Analysis:
         self.output_log += f"Total C++ repositories: {cpp_repo_count}\n"
 
     def log_final_analysis_results(self):
-        """Log the percentage of projects with TDD detected and the overall average adoption."""
-        # This remains the same: percentage of projects that have ANY TDD
-        detected_percentage = (self._projects_with_tdd_detected_count / SAMPLE_COUNT * 100) if SAMPLE_COUNT > 0 else 0
+        """Log comprehensive TDD metrics including average and global rates."""
+        num_projects_processed = len(self._tdd_adoption_rate_list)
         
-        self.output_log += f"\nFinal Results: {detected_percentage:.2f}% of {self._language} projects ({self._projects_with_tdd_detected_count}/{SAMPLE_COUNT}) have TDD patterns detected\n"
+        # 1. Calculation: Average of project percentages
+        # Formula: $\frac{\sum (\text{project percentage})}{\text{number of projects}}$
+        avg_adoption_rate = (sum(self._tdd_adoption_rate_list) / num_projects_processed) if num_projects_processed > 0 else 0
+
+        # 2. Calculation: Overall Language Adoption
+        # Formula: $\frac{\text{Total TDD Commits}}{\text{Total Commits}} \times 100$
+        overall_language_rate = (self._total_tdd_commits_count / self._total_commits_analysed_count * 100) if self._total_commits_analysed_count > 0 else 0
+
+        project_detection_rate = (self._projects_with_tdd_detected_count / num_projects_processed * 100) if num_projects_processed > 0 else 0
+
+        self.output_log += f"\n" + "="*30 + " FINAL RESULTS " + "="*30 + "\n"
+        self.output_log += f"Language: {self._language}\n"
+        self.output_log += f"Projects Processed: {num_projects_processed} (Sample Cap: {SAMPLE_COUNT})\n"
+        self.output_log += f"Projects with TDD Patterns Detected: {self._projects_with_tdd_detected_count} ({project_detection_rate:.2f}%)\n"
+        self.output_log += "-"*75 + "\n"
+        self.output_log += f"Total Commits across all projects: {self._total_commits_analysed_count}\n"
+        self.output_log += f"Total TDD Commits identified: {self._total_tdd_commits_count}\n"
+        self.output_log += "-"*75 + "\n"
+        self.output_log += f"Average TDD Adoption Rate (Mean of project %): {avg_adoption_rate:.2f}%\n"
+        self.output_log += f"Overall Language Adoption Rate (Total TDD / Total Commits): {overall_language_rate:.2f}%\n"
+        self.output_log += "="*75 + "\n"
+
+    def _compute_language_adoption_rate(self):
+        """
+        Computes the TDD adoption rate for the entire language:
+        (Sum of all TDD commits / Sum of all commits) * 100
+        """
+        if self._total_commits_analysed_count == 0:
+            return 0.0
         
-        avg_adoption_rate = self._compute_avg_adoption_rate()
-        self.output_log += f"Average TDD adoption rate across all {len(self._tdd_adoption_rate_list)} projects: {avg_adoption_rate:.2f}%\n"
+        return (self._total_tdd_commits_count / self._total_commits_analysed_count) * 100
 
     def _compute_avg_adoption_rate(self):
         """
