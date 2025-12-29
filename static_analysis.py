@@ -13,7 +13,7 @@ import math
 
 STATIC_ANALYSIS_OUTPUT_FILE = "analysis-output/{}_static_analysis.txt"
 SAMPLE_COUNT = 60
-HIGH_TDD_THRESHOLD = 50
+HIGH_TDD_THRESHOLD = 35
 JAVA = "Java"
 PYTHON = "Python"
 CPP = "C++"
@@ -428,7 +428,7 @@ class Static_Analysis:
         self.output_log += f"Total TDD Commits identified: {self._total_tdd_commits_count}\n"
         self.output_log += "-"*75 + "\n"
         self.output_log += f"Projects with ANY TDD detected (>0%): {self._projects_with_tdd_detected_count} ({any_tdd_rate:.2f}%)\n"
-        self.output_log += f"Projects with TDD adoption > {HIGH_TDD_THRESHOLD}%: {self._high_tdd_projects_count} ({high_tdd_rate:.2f}%)\n"
+        self.output_log += f"Projects with TDD adoption > ({HIGH_TDD_THRESHOLD}%): {self._high_tdd_projects_count} ({high_tdd_rate:.2f}%)\n"
         self.output_log += "-"*75 + "\n"
         self.output_log += f"Average TDD Adoption Rate (Mean of project %): {avg_adoption_rate:.2f}%\n"
         self.output_log += f"Overall Language Adoption Rate (Total TDD / Total Commits): {overall_language_rate:.2f}%\n"
