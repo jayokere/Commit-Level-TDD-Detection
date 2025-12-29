@@ -73,10 +73,13 @@ class Static_Analysis:
             percentage = (len(tdd_patterns) / total_commits * 100) if total_commits > 0 else 0
             self.output_log += f"TDD pattern percentage: {percentage:.2f}% ({len(tdd_patterns)}/{total_commits})\n"
 
+            # ALWAYS append the percentage, even if it is 0.0
+            self._tdd_adoption_rate_list.append(percentage)
+
             if tdd_patterns:
                 self._projects_with_tdd_detected_count += 1
                 self.output_log += f"TDD detected in project \"{name}\". Detection count set to {self._projects_with_tdd_detected_count}.\n"
-                self._tdd_adoption_rate_list.append(percentage)
+                #self._tdd_adoption_rate_list.append(percentage)
 
             for pattern in tdd_patterns:
                 self.log_if_verbose(f"{dumps(pattern, indent=2)}\n")
@@ -384,22 +387,27 @@ class Static_Analysis:
         self.output_log += f"Total C++ repositories: {cpp_repo_count}\n"
 
     def log_final_analysis_results(self):
-        """Log the percentage of projects with TDD detected over the sample count."""
-        percentage = (self._projects_with_tdd_detected_count / SAMPLE_COUNT * 100) if SAMPLE_COUNT > 0 else 0
-        self.output_log += f"\nFinal Results: {percentage:.2f}% of {self._language} projects ({self._projects_with_tdd_detected_count}/{SAMPLE_COUNT}) have TDD patterns detected\n"
+        """Log the percentage of projects with TDD detected and the overall average adoption."""
+        # This remains the same: percentage of projects that have ANY TDD
+        detected_percentage = (self._projects_with_tdd_detected_count / SAMPLE_COUNT * 100) if SAMPLE_COUNT > 0 else 0
+        
+        self.output_log += f"\nFinal Results: {detected_percentage:.2f}% of {self._language} projects ({self._projects_with_tdd_detected_count}/{SAMPLE_COUNT}) have TDD patterns detected\n"
+        
         avg_adoption_rate = self._compute_avg_adoption_rate()
-        self.output_log += f"Average TDD adoption rate for projects with TDD detected: {avg_adoption_rate:.2f}%\n"
+        self.output_log += f"Average TDD adoption rate across all {len(self._tdd_adoption_rate_list)} projects: {avg_adoption_rate:.2f}%\n"
 
     def _compute_avg_adoption_rate(self):
-        """Compute the average TDD adoption rate across all projects with TDD detected.
-        Returns the average percentage of TDD commits by summing all adoption rates
-        in _tdd_adoption_rate_list and dividing by the count of projects with TDD detected.
         """
-        if self._projects_with_tdd_detected_count == 0:
+        Compute the average TDD adoption rate across ALL analysed projects.
+        Sum of (total_tdd_commits / total_commits) for each project / total_number_of_projects
+        """
+        total_projects_analysed = len(self._tdd_adoption_rate_list)
+        
+        if total_projects_analysed == 0:
             return 0.0
 
-        total_adoption_rate = sum(self._tdd_adoption_rate_list)
-        avg_adoption_rate = total_adoption_rate / self._projects_with_tdd_detected_count
+        total_sum_of_percentages = sum(self._tdd_adoption_rate_list)
+        avg_adoption_rate = total_sum_of_percentages / total_projects_analysed
         return avg_adoption_rate
 
     def log_if_verbose(self, msg):
