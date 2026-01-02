@@ -13,7 +13,7 @@ import math
 
 STATIC_ANALYSIS_OUTPUT_FILE = "analysis-output/{}_static_analysis.txt"
 SAMPLE_COUNT = 60
-HIGH_TDD_THRESHOLD = 50
+HIGH_TDD_THRESHOLD = 35
 JAVA = "Java"
 PYTHON = "Python"
 CPP = "C++"
