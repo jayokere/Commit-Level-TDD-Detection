@@ -20,6 +20,7 @@ from db import (
 )
 from miners import FileAnalyser, TestAnalyser, CommitProcessor
 from miner_intro import ProgressMonitor
+from miners.file_analyser import VALID_CODE_EXTENSIONS
 
 """
 repo_miner.py
@@ -38,6 +39,7 @@ Key Features:
        and Cyclomatic Complexity at the file level.
     5. Test Coverage Analysis: Analyzes test method names to identify which source files 
        are being tested, addressing GitHub Issue #4 for improved TDD detection.
+    6. Language-Specific Mining: Restricts mining to files relevant to the project's language.
 """
 
 # The number of commits to hold in memory before performing a bulk write to MongoDB.
@@ -186,10 +188,10 @@ class Repo_miner:
                 s_date = datetime(shard_years[i], 1, 1)
                 e_date = datetime(shard_years[i+1], 1, 1)
                 if s_date > datetime.now(): break
-                jobs.append((name, raw_url, s_date, e_date))
+                jobs.append((name, raw_url, s_date, e_date, language))
         else:
             # Non-C++ projects don't need sharding
-            jobs.append((name, raw_url, None, None))
+            jobs.append((name, raw_url, None, None, language))
             
         return jobs
 
@@ -205,7 +207,7 @@ class Repo_miner:
         Returns:
             tuple: (project_name, new_commits_count, existing_count, error_message)
         """
-        project_name, raw_url, start_date, end_date, stop_event = args
+        project_name, raw_url, start_date, end_date, language, stop_event = args
         
         # Guard clause: Return immediately if the global stop signal (Ctrl+C) is set
         if stop_event.is_set(): return None
@@ -223,10 +225,11 @@ class Repo_miner:
                 s_str = start_date.strftime('%Y-%m') if start_date else "START"
                 e_str = end_date.strftime('%Y-%m') if end_date else "NOW"
                 year_str = f"({s_str} to {e_str})"
-                tqdm.write(f"🚀 [Start] {project_name} {year_str}")
+                tqdm.write(f"🚀 [Start] {project_name} {year_str} [{language}]")
 
             # Import the extension list for filtering
-            from miners.file_analyser import VALID_CODE_EXTENSIONS
+            
+            target_extensions = FileAnalyser.get_extensions_for_language(language)
             
             # Initialise PyDriller with Date Partitioning (if dates provided)
             # This is the key to speeding up C++
@@ -242,11 +245,11 @@ class Repo_miner:
             new_commits_mined, initial_count = processor.process_commits(
                 repo_obj, 
                 project_name, 
-                repo_url
+                repo_url,
+                language=language
             )
             
             if SHOW_WORKER_ACTIVITY:
-                worker_id = os.getpid()
                 if new_commits_mined > 0:
                     tqdm.write(f"✅ [Done] {project_name} {year_str}: {new_commits_mined} commits.")
         
@@ -318,10 +321,10 @@ class Repo_miner:
             with ProcessPoolExecutor(max_workers=max_workers) as executor:
                 try:
                     # Submit all jobs
-                    for p_name, url, start, end in jobs:
+                    for p_name, url, start, end, language in jobs:
                         futures.append(executor.submit(
                             self.mine_repo, 
-                            (p_name, url, start, end, stop_event)
+                            (p_name, url, start, end, language, stop_event)
                         ))
 
                     completed_mining = 0
