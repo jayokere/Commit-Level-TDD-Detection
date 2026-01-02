@@ -4,7 +4,7 @@ If true, check the next commit for a related source file. If true, mark the seco
 """
 from db import get_collection, COMMIT_COLLECTION, REPO_COLLECTION
 from bson.json_util import dumps
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Set, Tuple
 import os
 import re
 import argparse
@@ -281,30 +281,38 @@ class Static_Analysis:
 
     def _has_related_source_files(self, test_commit: Dict, source_commit: Dict) -> bool:
         """Check if the source commit has source files related to the test files in the test commit."""
-        test_filenames = self._extract_test_filenames(test_commit)
-        source_filenames = self._extract_source_filenames(source_commit)
+        test_entries = self._extract_test_file_entries(test_commit)
+        source_entries = self._extract_source_file_entries(source_commit)
 
-        for test_filename in test_filenames:
-            for source_filename in source_filenames:
+        for test_filename, test_methods in test_entries:
+            for source_filename, source_methods in source_entries:
+                # NEW: method-based matching OR name-based matching
+                if self._methods_indicate_relation(test_filename, test_methods, source_filename, source_methods):
+                    return True
                 if self._is_related_file(test_filename, source_filename):
                     return True
 
         return False
+
 
     def _has_test_and_source_file(self, commit: Dict) -> bool:
         """Check if a singular commit has both test files and related source files."""
-        test_filenames = self._extract_test_filenames(commit)
-        source_filenames = self._extract_source_filenames(commit)
+        test_entries = self._extract_test_file_entries(commit)
+        source_entries = self._extract_source_file_entries(commit)
 
-        if not test_filenames or not source_filenames:
+        if not test_entries or not source_entries:
             return False
 
-        for test_filename in test_filenames:
-            for source_filename in source_filenames:
+        for test_filename, test_methods in test_entries:
+            for source_filename, source_methods in source_entries:
+                # NEW: method-based matching OR name-based matching
+                if self._methods_indicate_relation(test_filename, test_methods, source_filename, source_methods):
+                    return True
                 if self._is_related_file(test_filename, source_filename):
                     return True
 
         return False
+
 
     def _extract_test_filenames(self, test_commit: Dict) -> List[str]:
         """Extract test filenames from a commit's test_coverage."""
@@ -331,6 +339,47 @@ class Static_Analysis:
                 source_filenames.append(filename)
 
         return source_filenames
+    
+    def _extract_test_file_entries(self, commit: Dict) -> List[Tuple[str, List[str]]]:
+        """
+        Returns [(test_filename, changed_methods_list), ...] from test_coverage.test_files.
+        """
+        tc = commit.get("test_coverage", {}) or {}
+        test_files = tc.get("test_files", []) or []
+        out: List[Tuple[str, List[str]]] = []
+
+        for tf in test_files:
+            if not isinstance(tf, dict):
+                continue
+            fn = tf.get("filename", "")
+            if not fn:
+                continue
+            cms = tf.get("changed_methods", []) or []
+            cms = [m for m in cms if isinstance(m, str) and m]
+            out.append((fn, cms))
+
+        return out
+
+    def _extract_source_file_entries(self, commit: Dict) -> List[Tuple[str, List[str]]]:
+        """
+        Returns [(source_filename, changed_methods_list), ...] from test_coverage.source_files.
+        """
+        tc = commit.get("test_coverage", {}) or {}
+        source_files = tc.get("source_files", []) or []
+        out: List[Tuple[str, List[str]]] = []
+
+        for sf in source_files:
+            if not isinstance(sf, dict):
+                continue
+            fn = sf.get("filename", "")
+            if not fn:
+                continue
+            cms = sf.get("changed_methods", []) or []
+            cms = [m for m in cms if isinstance(m, str) and m]
+            out.append((fn, cms))
+
+        return out
+
 
     def _is_related_file(self, test_file: str, source_file: str) -> bool:
         """
@@ -386,6 +435,111 @@ class Static_Analysis:
             return True
 
         return False
+    
+    def _methods_indicate_relation(
+        self,
+        test_filename: str,
+        test_methods: List[str],
+        source_filename: str,
+        source_methods: List[str],
+    ) -> bool:
+        """
+        Returns True if changed_methods suggest the test and source are related.
+        Conservative heuristic to avoid false positives.
+        """
+        if not test_methods or not source_methods:
+            return False
+
+        test_tokens = self._method_tokens(test_methods)
+        if not test_tokens:
+            return False
+
+        source_tokens = self._method_tokens(source_methods)
+        if not source_tokens:
+            return False
+
+        # Primary signal: meaningful token intersection
+        if test_tokens.intersection(source_tokens):
+            return True
+
+        # Secondary: test tokens reference source basename tokens
+        source_base_tokens = self._basename_tokens(source_filename)
+        if source_base_tokens and test_tokens.intersection(source_base_tokens):
+            return True
+
+        # Tertiary: normalized test method equals a source method
+        normalized_test = [self._normalize_test_method_name(m) for m in test_methods]
+        normalized_source = set(self._normalize_method_name(m) for m in source_methods)
+        for tm in normalized_test:
+            if tm and tm in normalized_source:
+                return True
+
+        return False
+
+    @staticmethod
+    def _normalize_method_name(name: str) -> str:
+        return name.strip().lower()
+
+    @staticmethod
+    def _normalize_test_method_name(name: str) -> str:
+        n = name.strip().lower()
+        for p in ("test_", "test", "should_", "should", "when_", "when", "given_", "given"):
+            if n.startswith(p):
+                n = n[len(p):]
+                break
+        return n.strip("_")
+
+    def _method_tokens(self, method_names: List[str]) -> Set[str]:
+        tokens: Set[str] = set()
+        for m in method_names:
+            for t in self._split_identifier(m):
+                t = t.lower()
+                if self._is_generic_token(t):
+                    continue
+                if len(t) < 3:
+                    continue
+                tokens.add(t)
+        return tokens
+
+    def _basename_tokens(self, filename: str) -> Set[str]:
+        base = os.path.splitext(os.path.basename(filename))[0]
+        tokens: Set[str] = set()
+        for t in self._split_identifier(base):
+            t = t.lower()
+            if self._is_generic_token(t):
+                continue
+            if len(t) < 3:
+                continue
+            tokens.add(t)
+        return tokens
+
+    @staticmethod
+    def _split_identifier(s: str) -> List[str]:
+        if not s:
+            return []
+        s = s.replace("-", "_")
+        parts = re.split(r"[_\W]+", s)
+        out: List[str] = []
+        for p in parts:
+            if not p:
+                continue
+            camel = re.findall(r"[A-Z]?[a-z]+|[A-Z]+(?=[A-Z][a-z]|\d|$)|\d+", p)
+            if camel:
+                out.extend(camel)
+            else:
+                out.append(p)
+        return out
+
+    @staticmethod
+    def _is_generic_token(t: str) -> bool:
+        generic = {
+            "test", "tests", "should", "when", "given", "then",
+            "setup", "teardown", "before", "after", "init",
+            "case", "cases", "spec", "it", "run", "runs",
+            "assert", "verify", "check",
+        }
+        return t in generic
+
 
     def get_commits_for_project(self, project_name) -> List[Dict[str, Any]]:
         """Fetch commits for the given project name from the mined commits repo
