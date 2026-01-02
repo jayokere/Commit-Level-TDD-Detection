@@ -51,8 +51,12 @@ def sync_commit_counts():
     else:
         print("ℹ️ No records required updating.")
 
-if __name__ == "__main__":
+def run_sync_counts():
+    """Wrapper to run the sync_commit_counts function."""
     try:
         sync_commit_counts()
     except Exception as e:
         print(f"❌ An error occurred during synchronisation: {e}")
+
+if __name__ == "__main__":
+    run_sync_counts()
