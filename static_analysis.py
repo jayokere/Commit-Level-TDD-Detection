@@ -127,30 +127,28 @@ class Static_Analysis:
         tdd_patterns = []
         updated_hashes = set()
 
-        for i in range(len(commits_list) - 1):
+        for i in range(len(commits_list)):
             current = commits_list[i]
-            next_commit = commits_list[i + 1]
 
             self.log_if_verbose(f"Checking current commit: {current.get('hash')}")
-            self.log_if_verbose(f"And potential next commit: {next_commit.get('hash')}")
 
-            # Check if current commit has both test and source files
+            # -------------------------------------------------
+            # 1) SAME-COMMIT TDD DETECTION
+            # -------------------------------------------------
             if self._has_test_and_source_file(current):
                 self.log_if_verbose(f"TDD pattern found in single commit: {current.get('hash')}")
+
                 test_files = self._extract_test_filenames(current)
                 source_files = self._extract_source_filenames(current)
 
-                # Compute percentage: number of test files / number of source files * 100
                 num_test = len(test_files)
                 num_source = len(source_files)
+
                 if num_source == 0:
                     percent = 0.0
                 else:
-                    percent = (num_test / num_source) * 100.0
-                # cap at 100
-                percent = min(100.0, percent)
+                    percent = min(100.0, (num_test / num_source) * 100.0)
 
-                # optionally write back to DB
                 if self._write_to_db:
                     ch = current.get("hash")
                     self._set_tdd_percentage(ch, percent)
@@ -158,40 +156,62 @@ class Static_Analysis:
                         updated_hashes.add(ch)
 
                 tdd_patterns.append({
-                    "test_commit": current["hash"],
+                    "test_commit": current.get("hash"),
                     "test_files": test_files,
                     "source_files": source_files,
-                    "tdd_percentage": percent
+                    "tdd_percentage": percent,
+                    "mode": "same_commit"
                 })
 
-            # Check if current commit has test files only and next commit has related source files
-            elif self._has_test_files_only(current) and self._has_related_source_files(current, next_commit):
-                self.log_if_verbose(f"TDD pattern found: {current.get('hash')} -> {next_commit.get('hash')}")
-                test_files = self._extract_test_filenames(current)
-                source_files = self._extract_source_filenames(next_commit)
+                # IMPORTANT:
+                # Do NOT check diff-commit logic if same-commit TDD was detected.
+                continue
 
-                #both commits are considered 100% TDD
-                percent = 100.0
+            # -------------------------------------------------
+            # 2) DIFF-COMMIT TDD DETECTION (only if next exists)
+            # -------------------------------------------------
+            if i < len(commits_list) - 1:
+                next_commit = commits_list[i + 1]
+                self.log_if_verbose(f"Checking next commit: {next_commit.get('hash')}")
 
-                if self._write_to_db:
-                    ch = current.get("hash")
-                    nh = next_commit.get("hash")
-                    self._set_tdd_percentage(ch, percent)
-                    self._set_tdd_percentage(nh, percent)
-                    if ch:
-                        updated_hashes.add(ch)
-                    if nh:
-                        updated_hashes.add(nh)
+                if (
+                    self._has_test_files_only(current)
+                    and self._has_related_source_files(current, next_commit)
+                ):
+                    self.log_if_verbose(
+                        f"TDD pattern found across commits: "
+                        f"{current.get('hash')} -> {next_commit.get('hash')}"
+                    )
 
-                tdd_patterns.append({
-                    "test_commit": current["hash"],
-                    "source_commit": next_commit["hash"],
-                    "test_files": test_files,
-                    "source_files": source_files,
-                    "tdd_percentage": percent
-                })
+                    test_files = self._extract_test_filenames(current)
+                    source_files = self._extract_source_filenames(next_commit)
+                    percent = 100.0
+
+                    if self._write_to_db:
+                        ch = current.get("hash")
+                        nh = next_commit.get("hash")
+
+                        self._set_tdd_percentage(ch, percent)
+                        self._set_tdd_percentage(nh, percent)
+
+                        if ch:
+                            updated_hashes.add(ch)
+                        if nh:
+                            updated_hashes.add(nh)
+
+                    tdd_patterns.append({
+                        "test_commit": current.get("hash"),
+                        "source_commit": next_commit.get("hash"),
+                        "test_files": test_files,
+                        "source_files": source_files,
+                        "tdd_percentage": percent,
+                        "mode": "diff_commit"
+                    })
             else:
-                self.log_if_verbose(f"No TDD pattern found: {current.get('hash')} -> {next_commit.get('hash')}\n")
+                self.log_if_verbose(
+                    f"Skipping diff-commit check for last commit: {current.get('hash')}"
+                )
+
 
         # When write is enabled, mark commits not detected as explicit non-detected (0.0)
         if self._write_to_db:
