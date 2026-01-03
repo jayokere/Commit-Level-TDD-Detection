@@ -28,7 +28,7 @@ class TestAnalyser:
         lower_filename = base_name.lower()
 
         # Categorise test file naming conventions as prefixes or suffixes
-        prefixes = ( 'test_', 'tests_')
+        prefixes = ( 'test_', 'tests_', 'test', 'tests', 'spec_', '_spec', 'spec')
         suffixes = ('test', 'tests', '_test', '_tests', 'spec', '_spec')
         
         # Check for the test prefixes or suffixes in the filename
