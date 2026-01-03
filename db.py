@@ -1,5 +1,6 @@
 import os
 import sys
+from datetime import datetime
 from dotenv import load_dotenv, find_dotenv
 from pymongo import MongoClient, ASCENDING, DESCENDING, UpdateOne
 from pymongo.errors import PyMongoError, AutoReconnect, DocumentTooLarge
@@ -89,6 +90,30 @@ def get_collection(collection_name):
     """Generic helper to get a collection."""
     db = get_db_connection()
     return db[collection_name]
+
+# -------------------------------------------------------------------------
+# NEW: Status Management
+# -------------------------------------------------------------------------
+
+def get_completed_project_names():
+    """
+    Returns a set of project names that are explicitly marked as 'completed'.
+    Replaces get_all_mined_project_names for quota checking.
+    """
+    col = get_collection(REPO_COLLECTION)
+    # Only fetch projects where mining_status is 'completed'
+    cursor = col.find({"mining_status": "completed"}, {"name": 1, "_id": 0})
+    return {doc['name'] for doc in cursor}
+
+def mark_project_as_completed(project_name):
+    """
+    Marks a project as fully mined in the mined-repos collection.
+    """
+    col = get_collection(REPO_COLLECTION)
+    col.update_one(
+        {"name": project_name},
+        {"$set": {"mining_status": "completed", "last_mined": datetime.now()}}
+    )
 
 # -------------------------------------------------------------------------
 # Data Access Objects (DAO) - Repo Management

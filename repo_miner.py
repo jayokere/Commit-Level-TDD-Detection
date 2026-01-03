@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 import random
 from datetime import datetime
 import requests
+from collections import defaultdict
 
 # Internal Modules
 from utils import measure_time
@@ -16,7 +17,8 @@ from db import (
     get_python_projects_to_mine,
     get_cpp_projects_to_mine, 
     ensure_indexes,
-    get_all_mined_project_names 
+    get_completed_project_names,
+    mark_project_as_completed
 )
 from miners import FileAnalyser, TestAnalyser, CommitProcessor
 from miner_intro import ProgressMonitor
@@ -63,7 +65,7 @@ class Repo_miner:
         
         # Retrieve the set of project names already stored in the DB
         # This allows for O(1) lookups to check if a project is done.
-        already_mined = get_all_mined_project_names()
+        already_mined = get_completed_project_names()
         self.projects = []
         
         def fill_quota(candidates, language_name, target_quota=60):
@@ -300,8 +302,16 @@ class Repo_miner:
 
         # --- PHASE 2: MINING (Multiprocessing) ---
         total_jobs = len(jobs)
+
+        shards_remaining = defaultdict(int)
+        project_errors = defaultdict(bool) # Track if any shard failed
+
+        for j in jobs:
+            p_name = j[0] # The first element is the project name
+            shards_remaining[p_name] += 1
+
         print(f"\n[INFO] Preparation complete. Starting parallel mining with {total_jobs} segments.")
-        
+
         env_max = os.getenv("MAX_WORKERS")
         if env_max and env_max.isdigit():
             max_workers = int(env_max)
@@ -342,7 +352,18 @@ class Repo_miner:
                         
                         if error and "No commits found" not in str(error):
                             monitor.log(f"❌ {p_name}: {error}")
+                            project_errors[p_name] = True
                         
+                        shards_remaining[p_name] -= 1
+
+                        # If 0 shards remain AND no errors occurred, mark as "completed" in DB
+                        if shards_remaining[p_name] == 0:
+                            if not project_errors[p_name]:
+                                mark_project_as_completed(p_name)
+                                monitor.log(f"🏆 {p_name} FULLY COMPLETED.")
+                            else:
+                                monitor.log(f"⚠️ {p_name} finished with errors (not complete).")
+
                         completed_mining += 1
                         monitor.update(completed_mining)
 
