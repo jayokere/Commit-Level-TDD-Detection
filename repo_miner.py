@@ -8,7 +8,7 @@ from tqdm import tqdm
 from pydriller import Repository
 from urllib.parse import urlparse
 import random
-from datetime import datetime
+from datetime import datetime, timedelta
 import requests
 from collections import defaultdict
 
@@ -122,10 +122,9 @@ class Repo_miner:
     def _prepare_job(project):
         """
         Helper function to calculate shards for a single project.
-        This is run in a thread pool to avoid blocking on network requests (for C++ API checks).
+        UPDATED: Splits C++ projects into 90-day chunks to prevent timeouts.
         """
         jobs = []
-        current_year = datetime.now().year
         
         name = project.get('name')
         raw_url = project.get('repo_url') or project.get('url')
@@ -139,7 +138,7 @@ class Repo_miner:
 
         start_year = 2000
         
-        # Special handling for C++: Fetch creation date from API to avoid cloning ancient history
+        # Special handling for C++: Fetch creation date from API
         if language == 'C++':
             try:
                 if raw_url:
@@ -162,25 +161,33 @@ class Repo_miner:
                                 if created_at:
                                     start_year = int(created_at[:4])
             except Exception:
-                # If API fails, fallback to 2000
                 print(f"⚠️ Warning: Could not fetch creation date for {name}. Using default start year {start_year}.")
                 pass
 
-            # Create the shards based on the year found
-            shard_years = list(range(start_year, current_year + 2))
+            # --- NEW LOGIC: Split by years ---
+            current_date = datetime(start_year, 1, 1)
+            now = datetime.now()
 
-            for i in range(len(shard_years) - 1):
-                s_date = datetime(shard_years[i], 1, 1)
-                e_date = datetime(shard_years[i+1], 1, 1)
+            while current_date < now:
+                # Calculate end of this shard (1 year later)
+                next_date = current_date + timedelta(days=365)
                 
-                # Stop creating future shards
-                if s_date > datetime.now(): break
+                # Cap the end date at 'now' so we don't mine the future
+                if next_date > now:
+                    next_date = now
+
+                jobs.append((name, raw_url, current_date, next_date, language))
                 
-                jobs.append((name, raw_url, s_date, e_date, language))
+                # Move cursor forward
+                current_date = next_date
+                
+                # specific break to ensure we don't loop infinitely if next_date isn't advancing (safety)
+                if current_date >= now:
+                    break
+            # -----------------------------------------------------
+
         else:
-            # Java/Python: Just one big job (PyDriller handles cloning efficiently usually)
-            # OR we could shard them too, but currently logic kept as per original request/design
-            # NOTE: If Java repos are huge, you might want to enable sharding for them too.
+            # Java/Python: Keep as one big job (or modify here if they start timing out too)
             jobs.append((name, raw_url, None, None, language))
             
         return jobs
