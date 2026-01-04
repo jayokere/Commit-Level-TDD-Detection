@@ -390,6 +390,83 @@ else:
     print("Lifecycle heatmap generated: analysis-output/charts/tdd_lifecycle_heatmap.png")
 
 
+# ============================================================
+# 5) Lifecycle trend: TDD adoption vs project maturity stage
+# ============================================================
+
+LIFECYCLE_FILES = {
+    "C++": ANALYSIS_DIR / "C++_lifecycle_analysis.txt",
+    "Java": ANALYSIS_DIR / "Java_lifecycle_analysis.txt",
+    "Python": ANALYSIS_DIR / "Python_lifecycle_analysis.txt",
+}
+
+def parse_lifecycle_trend(path: Path) -> Dict[int, float]:
+    """
+    Parses the FINAL LIFECYCLE TREND table and returns:
+    { stage_number (1-4): average_tdd_pct }
+    """
+    text = path.read_text(encoding="utf-8", errors="ignore")
+
+    stage_re = re.compile(
+        r"Stage\s+(\d+).*?\|\s*([0-9.]+)%"
+    )
+
+    stages: Dict[int, float] = {}
+    for m in stage_re.finditer(text):
+        stage = int(m.group(1))
+        pct = float(m.group(2))
+        stages[stage] = pct
+
+    return stages
+
+
+# Collect lifecycle data
+lifecycle_data: Dict[str, Dict[int, float]] = {}
+
+for lang, path in LIFECYCLE_FILES.items():
+    if not path.exists():
+        print(f"Lifecycle file missing for {lang}, skipping.")
+        continue
+    lifecycle_data[lang] = parse_lifecycle_trend(path)
+
+# Plot lifecycle trend
+if lifecycle_data:
+    plt.figure(figsize=(8, 5))
+
+    for lang, stages in lifecycle_data.items():
+        if not stages:
+            continue
+
+        xs = sorted(stages.keys())
+        ys = [stages[s] for s in xs]
+
+        plt.plot(
+            xs,
+            ys,
+            marker="o",
+            linewidth=2,
+            label=lang,
+            color=colors.get(lang)
+        )
+
+    plt.xticks([1, 2, 3, 4], [
+        "Stage 1\n(Inception)",
+        "Stage 2\n(Growth)",
+        "Stage 3\n(Maturity)",
+        "Stage 4\n(Maintenance)"
+    ])
+
+    plt.ylabel("Average TDD adoption (%)")
+    plt.xlabel("Project lifecycle stage (by commit quartiles)")
+    plt.title("TDD adoption across project lifecycle stages")
+    plt.legend()
+    plt.grid(True, linestyle="--", alpha=0.3)
+    plt.tight_layout()
+
+    plt.savefig(CHARTS_DIR / "tdd_lifecycle_trend.png", dpi=200)
+    plt.close()
+
+
 
 
 print("Charts generated successfully.")
