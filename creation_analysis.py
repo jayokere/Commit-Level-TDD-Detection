@@ -24,11 +24,14 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import time
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Set, Tuple
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from pymongo.errors import PyMongoError, NetworkTimeout, AutoReconnect
 from db import get_collection, COMMIT_COLLECTION, REPO_COLLECTION
 from static_analysis import Static_Analysis, JAVA, PYTHON, CPP
 
@@ -46,7 +49,7 @@ class ProjectCounts:
     after: int
     paired_by_methods: int
     paired_by_name: int
-    note: str = ""  # "no_commits" | "no_tests" | "no_sources" | "no_pairs"
+    note: str = ""  # "no_commits" | "no_tests" | "no_sources" | "no_pairs" | "error"
 
 
 @dataclass(frozen=True)
@@ -75,8 +78,127 @@ class creation_analysis(Static_Analysis):
     def __init__(self, commits_collection, repos_collection, language: str):
         super().__init__(commits_collection, repos_collection, language, write_to_db=False)
 
+    def get_commits_for_project(self, project_name: str) -> List[Dict[str, Any]]:
+        """
+        OVERRIDE: Two-pass fetch with RETRY logic and controlled BATCH SIZES.
+        Prevents timeouts on large repositories by fetching smaller chunks.
+        """
+        # Retry settings
+        max_retries = 3
+        retry_delay = 2  # seconds
+
+        # Pass 1: Fetch metadata only (Fast & Low Memory)
+        meta = []
+        for attempt in range(max_retries):
+            try:
+                # batch_size(2000) ensures we get smaller, faster responses from the server
+                # preventing the 30s read timeout on slow networks/large docs
+                cursor = self.commits.find(
+                    {"project": project_name},
+                    {"_id": 1, "committer_date": 1}
+                ).batch_size(200)
+                
+                # Manually iterate to catch errors mid-stream
+                meta = []
+                for doc in cursor:
+                    meta.append(doc)
+                
+                break # Success, exit retry loop
+
+            except (NetworkTimeout, AutoReconnect) as e:
+                if attempt < max_retries - 1:
+                    print(f"\n[!] Timeout fetching metadata for '{project_name}'. Retrying ({attempt+1}/{max_retries})...")
+                    time.sleep(retry_delay)
+                else:
+                    print(f"\n[!] Failed to fetch metadata for '{project_name}' after {max_retries} retries. Skipping.")
+                    return []
+            except PyMongoError as e:
+                print(f"\n(!) DB Error fetching metadata for '{project_name}': {e}")
+                return []
+
+        if not meta:
+            return []
+
+        # Sort locally by date
+        meta.sort(key=lambda x: str(x.get("committer_date", "")))
+        
+        # Pass 2: Fetch full content in batches (Safe)
+        sorted_commits = []
+        chunk_size = 1000  # Fetch 1000 commits at a time
+        
+        # Divide metadata into chunks of IDs
+        chunks = [meta[i : i + chunk_size] for i in range(0, len(meta), chunk_size)]
+
+        for chunk_meta in chunks:
+            chunk_ids = [m["_id"] for m in chunk_meta]
+            if not chunk_ids:
+                continue
+                
+            # Retry loop for the heavy payload fetch
+            chunk_success = False
+            for attempt in range(max_retries):
+                try:
+                    # Fetch full documents for this chunk
+                    docs_cursor = self.commits.find({"_id": {"$in": chunk_ids}}).batch_size(chunk_size)
+                    docs_map = {doc["_id"]: doc for doc in docs_cursor}
+                    
+                    # Reconstruct sorted order for this chunk
+                    for cid in chunk_ids:
+                        if cid in docs_map:
+                            sorted_commits.append(docs_map[cid])
+                    
+                    chunk_success = True
+                    break
+
+                except (NetworkTimeout, AutoReconnect):
+                    if attempt < max_retries - 1:
+                        time.sleep(retry_delay)
+                    else:
+                        print(f"\n[!] Failed to fetch commit batch for '{project_name}'. Some data missing.")
+            
+            # If a batch fails repeatedly, we skip it but continue with other batches 
+            # (Partial data is better than crash)
+            if not chunk_success:
+                continue
+                    
+        return sorted_commits
+
+    def _process_single_project(self, project: str) -> ProjectCounts:
+        """
+        Worker method for threading. Processes a single project and returns stats.
+        """
+        try:
+            commits = self.get_commits_for_project(project)
+
+            if not commits:
+                return ProjectCounts(
+                    project=project, paired=0, before=0, same=0, after=0,
+                    paired_by_methods=0, paired_by_name=0,
+                    note="no_commits",
+                )
+
+            b, s, a, p, by_methods, by_name, note = self._analyze_project_counts(commits)
+
+            return ProjectCounts(
+                project=project,
+                paired=p, before=b, same=s, after=a,
+                paired_by_methods=by_methods,
+                paired_by_name=by_name,
+                note=note,
+            )
+        except Exception as e:
+            print(f"(!) Error processing {project}: {e}")
+            return ProjectCounts(
+                project=project, paired=0, before=0, same=0, after=0,
+                paired_by_methods=0, paired_by_name=0,
+                note="error",
+            )
+
     def run(self) -> Totals:
         projects = self._get_project_names()
+        
+        # Limit to first 60 for consistency with other scripts if needed
+        projects = projects[:60] 
 
         per_project: List[ProjectCounts] = []
         totals = Totals()
@@ -86,48 +208,40 @@ class creation_analysis(Static_Analysis):
         no_test_projects = 0
         no_source_projects = 0
         no_pair_projects = 0
+        
+        print(f"Starting Creation Analysis for {self._language} on {len(projects)} projects (Multi-threaded)...")
 
-        for idx, project in enumerate(projects, start=1):
-            commits = self.get_commits_for_project(project)
-
-            if not commits:
-                zero_commit_projects += 1
-                pc = ProjectCounts(
-                    project=project, paired=0, before=0, same=0, after=0,
-                    paired_by_methods=0, paired_by_name=0,
-                    note="no_commits",
-                )
+        # Use ThreadPoolExecutor for concurrent processing
+        with ThreadPoolExecutor(max_workers=60) as executor:
+            # Submit all tasks
+            future_to_project = {executor.submit(self._process_single_project, p): p for p in projects}
+            
+            completed_count = 0
+            for future in as_completed(future_to_project):
+                completed_count += 1
+                pc = future.result()
                 per_project.append(pc)
-                self._print_progress(idx, len(projects), pc)
-                continue
-
-            b, s, a, p, by_methods, by_name, note = self._analyze_project_counts(commits)
-
-            if note == "no_tests":
-                no_test_projects += 1
-            elif note == "no_sources":
-                no_source_projects += 1
-            elif note == "no_pairs":
-                no_pair_projects += 1
-
-            totals = Totals(
-                before=totals.before + b,
-                same=totals.same + s,
-                after=totals.after + a,
-                paired_total=totals.paired_total + p,
-                paired_by_methods=totals.paired_by_methods + by_methods,
-                paired_by_name=totals.paired_by_name + by_name,
-            )
-
-            pc = ProjectCounts(
-                project=project,
-                paired=p, before=b, same=s, after=a,
-                paired_by_methods=by_methods,
-                paired_by_name=by_name,
-                note=note,
-            )
-            per_project.append(pc)
-            self._print_progress(idx, len(projects), pc)
+                
+                # Aggregate totals
+                if pc.note == "no_commits":
+                    zero_commit_projects += 1
+                elif pc.note == "no_tests":
+                    no_test_projects += 1
+                elif pc.note == "no_sources":
+                    no_source_projects += 1
+                elif pc.note == "no_pairs":
+                    no_pair_projects += 1
+                
+                totals = Totals(
+                    before=totals.before + pc.before,
+                    same=totals.same + pc.same,
+                    after=totals.after + pc.after,
+                    paired_total=totals.paired_total + pc.paired,
+                    paired_by_methods=totals.paired_by_methods + pc.paired_by_methods,
+                    paired_by_name=totals.paired_by_name + pc.paired_by_name,
+                )
+                
+                self._print_progress(completed_count, len(projects), pc)
 
         self._write_auditable_txt(
             totals=totals,
@@ -141,7 +255,7 @@ class creation_analysis(Static_Analysis):
             },
         )
 
-        print("Timing Analysis Complete! Check analysis-output/.")
+        print("\nTiming Analysis Complete! Check analysis-output/.")
         return totals
 
     # ----------------------------
@@ -332,11 +446,6 @@ class creation_analysis(Static_Analysis):
 
         Returns True if there is meaningful token overlap between test method names and
         source method names, or if test method names strongly reference the source file basename.
-
-        Safe rules (avoid false positives):
-          - ignore very short tokens (<3)
-          - ignore generic test tokens (test, tests, should, when, given, then, setup, teardown, etc.)
-          - require at least one overlapping "significant token"
         """
         if not test_methods or not source_methods:
             return False

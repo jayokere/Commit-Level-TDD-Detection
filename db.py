@@ -12,6 +12,7 @@ load_dotenv(find_dotenv())
 
 # Constants
 DB_NAME = "mined-data"
+APACHE_COLLECTION = "apache-repos"
 REPO_COLLECTION = "mined-repos"
 COMMIT_COLLECTION = "mined-commits"
 
