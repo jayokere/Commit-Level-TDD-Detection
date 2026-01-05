@@ -38,6 +38,7 @@ class Static_Analysis:
         self._language = language
         self._isVerbose = False
         self.output_log = ""
+        self.final_log = ""
         self._projects_with_tdd_detected_count = 0 
         self._high_tdd_projects_count = 0 
         self._tdd_adoption_rate_list = []
@@ -397,16 +398,18 @@ class Static_Analysis:
         self._isVerbose = verbose
 
     def log_totals(self):
-        self.output_log += f"Analysis Date: {datetime.now()}\nTotal repositories: {self.repos.count_documents({})}\nTotal commits: {self.commits.count_documents({})}\n"
+        self.final_log += f"Analysis Date: {datetime.now()}\nTotal repositories analysed: {self.repos.count_documents({})}\nTotal commits analysed: {self.commits.count_documents({})}\n"
 
     def log_final_analysis_results(self):
         num_processed = len(self._tdd_adoption_rate_list)
         avg_rate = (sum(self._tdd_adoption_rate_list) / num_processed) if num_processed > 0 else 0
         overall_rate = (self._total_tdd_commits_count / self._total_commits_analysed_count * 100) if self._total_commits_analysed_count > 0 else 0
         
-        self.output_log += f"\n{'='*30} FINAL RESULTS {'='*30}\nLanguage: {self._language}\nProjects Processed: {num_processed}\n"
-        self.output_log += f"Total Commits: {self._total_commits_analysed_count}\nTotal TDD Commits: {self._total_tdd_commits_count}\n"
-        self.output_log += f"Projects with TDD: {self._projects_with_tdd_detected_count}\nAverage Adoption Rate: {avg_rate:.2f}%\nOverall Adoption Rate: {overall_rate:.2f}%\n{'='*75}\n"
+        self.final_log += f"\n{'='*30} FINAL RESULTS {'='*30}\nLanguage: {self._language}\nProjects Processed: {num_processed}\n"
+        self.final_log += f"Total {self._language} Commits: {self._total_commits_analysed_count}\nTotal TDD Commits: {self._total_tdd_commits_count}\n"
+        self.final_log += f"Projects with TDD: {self._projects_with_tdd_detected_count}\nAverage Adoption Rate: {avg_rate:.2f}%\nOverall Adoption Rate: {overall_rate:.2f}%\n{'='*75}\n"
+
+        self.output_log += self.final_log
 
     def print_output_log(self):
         print("\n" + "=" * 80)
