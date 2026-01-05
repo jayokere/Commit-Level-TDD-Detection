@@ -10,6 +10,9 @@ from utils import measure_time
 from repo_miner import Repo_miner 
 from sync_counts import run_sync_counts
 from source_file_calculator import run_calculator
+from lifecycle_analysis import run as lifecycle_analysis
+from creation_analysis import run as creation_analysis
+from static_analysis import run as static_analysis
 
 # Main function
 @measure_time
@@ -32,6 +35,12 @@ def main() -> None:
     run_calculator()
 
     run_sync_counts()
+
+    static_analysis("4")
+
+    lifecycle_analysis("4")
+
+    creation_analysis("4")
 
 if __name__ == "__main__":
     main()

@@ -7,7 +7,6 @@ from bson.json_util import dumps
 from typing import List, Dict, Any, Optional, Set, Tuple
 import os
 import re
-import argparse
 from datetime import datetime
 # --- MULTITHREADING IMPORTS ---
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -421,21 +420,45 @@ class Static_Analysis:
             with open(filepath, "w") as f: f.write(self.output_log)
         except IOError as e: print(f"Error writing to file {filepath}: {e}")
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Analyze TDD patterns")
-    parser.add_argument("-l", "--language", type=str, choices=[JAVA, PYTHON, CPP], required=True)
-    parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose logging")
-    parser.add_argument("--write", action="store_true", help="Write metrics to DB")
-    args = parser.parse_args()
+# ----------------------------
+# CLI
+# ----------------------------
 
-    analysis = Static_Analysis(commits, repos, args.language, write_to_db=args.write)
-    analysis.set_is_verbose(args.verbose)
-    analysis.log_totals()
-    analysis.analyze()
-    analysis.log_final_analysis_results()
-    analysis.print_output_log()
-    analysis.write_output_log()
-    print(f"Analysis Complete! Check analysis-output folder.")
+def run(choice: str) -> None:
+    """Main function to run static analysis based on user choice."""
+    # Map inputs to a list of languages to process
+    language_map = {
+        "1": [JAVA], 
+        "2": [PYTHON], 
+        "3": [CPP],
+        "4": [JAVA, PYTHON, CPP]
+    }
+    
+    if choice not in language_map:
+        print("Invalid selection. Please run the script again and choose 1-4.")
+        return
+
+    target_languages = language_map[choice]
+
+    for lang in target_languages:
+        print(f"\nProcessing {lang} Static Analysis...")
+        # Defaults: write_to_db=False, verbose=False for manual runs
+        analysis = Static_Analysis(commits, repos, lang, write_to_db=False)
+        
+        analysis.log_totals()
+        analysis.analyze()
+        analysis.log_final_analysis_results()
+        analysis.print_output_log()
+        analysis.write_output_log()
+        print(f"Analysis for {lang} Complete! Check analysis-output folder.")
 
 if __name__ == "__main__":
-    main()
+    # Options menu for manual selection
+    print("\n--- TDD Static Analysis Tool (Multi-threaded) ---")
+    print("1. Java")
+    print("2. Python")
+    print("3. C++")
+    print("4. All Languages")
+    
+    choice = input("\nSelect a language to analyse (1-4): ").strip()
+    run(choice)

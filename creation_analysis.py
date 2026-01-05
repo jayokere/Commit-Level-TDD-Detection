@@ -12,16 +12,10 @@ Association strategy for each test file:
 
 Output:
 - analysis-output/<Language>_test_source_timing_audit.txt
-
-Run:
-  python creation_analysis.py -l Java
-  python creation_analysis.py -l Python
-  python creation_analysis.py -l C++
 """
 
 from __future__ import annotations
 
-import argparse
 import os
 import re
 import time
@@ -110,7 +104,7 @@ class creation_analysis(Static_Analysis):
                     print(f"\n[!] Timeout fetching metadata for '{project_name}'. Retrying ({attempt+1}/{max_retries})...")
                     time.sleep(retry_delay)
                 else:
-                    print(f"\n[!] Failed to fetch metadata for '{project_name}' after {max_retries} retries. Skipping.")
+                    print(f"\n[!] Failed to fetch metadata for '{project_name}'. Skipping.")
                     return []
             except PyMongoError as e:
                 print(f"\n(!) DB Error fetching metadata for '{project_name}': {e}")
@@ -157,7 +151,6 @@ class creation_analysis(Static_Analysis):
                         print(f"\n[!] Failed to fetch commit batch for '{project_name}'. Some data missing.")
             
             # If a batch fails repeatedly, we skip it but continue with other batches 
-            # (Partial data is better than crash)
             if not chunk_success:
                 continue
                     
@@ -197,7 +190,7 @@ class creation_analysis(Static_Analysis):
     def run(self) -> Totals:
         projects = self._get_project_names()
         
-        # Limit to first 60 for consistency with other scripts if needed
+        # Limit to first 60 for consistency with other scripts
         projects = projects[:60] 
 
         per_project: List[ProjectCounts] = []
@@ -290,15 +283,14 @@ class creation_analysis(Static_Analysis):
 
         for t in tests:
             candidates = candidates_map.get(t, set())
-            # keep only candidates that exist in this project (have first-seen timestamps)
+            # keep only candidates that exist in this project
             candidates = [s for s in candidates if s in first_seen_source]
 
             used_methods = False
             used_name = False
 
             if candidates:
-                # Prefer method-derived candidates if any exist for this test
-                # (provenance_map tracks whether each candidate was added by methods or name)
+                # Prefer method-derived candidates
                 method_candidates = [s for s in candidates if provenance_map.get((t, s)) == "methods"]
                 if method_candidates:
                     used_methods = True
@@ -312,7 +304,7 @@ class creation_analysis(Static_Analysis):
                     used_name = True
                     sfile = self._best_source_match(t, sorted(candidates))
             else:
-                # fallback: scan all sources by name heuristic (original behaviour)
+                # fallback: scan all sources by name heuristic
                 used_name = True
                 sfile = self._best_source_match(t, sources)
 
@@ -379,10 +371,6 @@ class creation_analysis(Static_Analysis):
         Returns:
           candidates_map: test_file -> set(source_file candidates)
           provenance_map: (test_file, source_file) -> "methods" | "name"
-
-        We build candidates by looking at each commit's test_coverage and:
-          - If a test file and a source file are name-related -> candidate ("name")
-          - If their changed_methods look related -> candidate ("methods")
         """
         candidates: Dict[str, Set[str]] = defaultdict(set)
         provenance: Dict[Tuple[str, str], str] = {}
@@ -424,12 +412,11 @@ class creation_analysis(Static_Analysis):
                     if self._methods_indicate_relation(tfn, tmethods, sfn, smethods):
                         candidates[tfn].add(sfn)
                         provenance[(tfn, sfn)] = "methods"
-                        continue  # method evidence is strongest
+                        continue
 
                     # (B) Name-based relation
                     if self._is_related_file(tfn, sfn):
                         candidates[tfn].add(sfn)
-                        # only set provenance if not already set by methods
                         provenance.setdefault((tfn, sfn), "name")
 
         return dict(candidates), provenance
@@ -444,7 +431,6 @@ class creation_analysis(Static_Analysis):
         """
         Heuristic method-level matching using changed_methods lists.
         """
-        # Renamed params to match base class: test_f, test_m, source_f, source_m
         if not test_m or not source_m:
             return False
 
@@ -489,9 +475,6 @@ class creation_analysis(Static_Analysis):
         return n.strip("_")
 
     def _method_tokens(self, methods: List[str]) -> Set[str]:
-        """
-        Tokenize method names into a set of significant tokens.
-        """
         tokens: Set[str] = set()
         for m in methods:
             for t in self._split_identifier(m):
@@ -504,9 +487,6 @@ class creation_analysis(Static_Analysis):
         return tokens
 
     def _basename_tokens(self, filename: str) -> Set[str]:
-        """
-        Tokenize a file basename (no path, no extension) similarly to method tokenization.
-        """
         base = os.path.splitext(os.path.basename(filename))[0]
         tokens = set()
         for t in self._split_identifier(base):
@@ -520,9 +500,6 @@ class creation_analysis(Static_Analysis):
 
     @staticmethod
     def _split_identifier(s: str) -> List[str]:
-        """
-        Split snake_case, kebab-case, and camelCase identifiers into tokens.
-        """
         if not s:
             return []
         s = s.replace("-", "_")
@@ -531,7 +508,6 @@ class creation_analysis(Static_Analysis):
         for p in parts:
             if not p:
                 continue
-            # camelCase split
             camel = re.findall(r"[A-Z]?[a-z]+|[A-Z]+(?=[A-Z][a-z]|\d|$)|\d+", p)
             if camel:
                 out.extend(camel)
@@ -541,9 +517,6 @@ class creation_analysis(Static_Analysis):
 
     @staticmethod
     def _is_generic_token(t: str) -> bool:
-        """
-        Tokens that are too generic to be evidence of a tested component.
-        """
         generic = {
             "test", "tests", "should", "when", "given", "then",
             "setup", "teardown", "before", "after", "init",
@@ -557,14 +530,8 @@ class creation_analysis(Static_Analysis):
     # ----------------------------
 
     def _best_source_match(self, test_file: str, source_files: List[str]) -> Optional[str]:
-        """
-        Pick a deterministic "best" matching source among source_files using _is_related_file.
-        If multiple matches, break ties by basename-length proximity then lexicographic.
-        """
         matches = [s for s in source_files if self._is_related_file(test_file, s)]
         if not matches:
-            # If we got here with candidates produced by methods, they might not be name-related.
-            # In that case, just pick deterministically.
             if source_files:
                 return sorted(source_files)[0]
             return None
@@ -683,33 +650,39 @@ class creation_analysis(Static_Analysis):
 # CLI
 # ----------------------------
 
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Count whether test files appear before/same/after related source files (TXT audit only)."
-    )
-    parser.add_argument(
-        "-l",
-        "--language",
-        type=str,
-        choices=[JAVA, PYTHON, CPP],
-        required=True,
-        help='Programming language to analyze ("Java", "Python", or "C++")',
-    )
-    parser.add_argument(
-        "-v",
-        "--verbose",
-        action="store_true",
-        help="Enable verbose logging",
-    )
-    args = parser.parse_args()
+def run(choice: str) -> None:
+    """Main function to run creation analysis based on user choice."""
+    # Map inputs to a list of languages to process
+    language_map = {
+        "1": [JAVA], 
+        "2": [PYTHON], 
+        "3": [CPP],
+        "4": [JAVA, PYTHON, CPP]
+    }
+    
+    if choice not in language_map:
+        print("Invalid selection. Please run the script again and choose 1-4.")
+        return
 
+    target_languages = language_map[choice]
+
+    # Database setup
     commits = get_collection(COMMIT_COLLECTION)
     repos = get_collection(REPO_COLLECTION)
 
-    analysis = creation_analysis(commits_collection=commits, repos_collection=repos, language=args.language)
-    analysis.set_is_verbose(args.verbose)
-    analysis.run()
+    for lang in target_languages:
+        print(f"\nProcessing {lang} Creation Analysis...")
+        analysis = creation_analysis(commits_collection=commits, repos_collection=repos, language=lang)
+        analysis.run()
 
 
 if __name__ == "__main__":
-    main()
+    # Options menu for manual selection
+    print("\n--- TDD Creation Timing Analysis Tool (Multi-threaded) ---")
+    print("1. Java")
+    print("2. Python")
+    print("3. C++")
+    print("4. All Languages")
+    
+    choice = input("\nSelect a language to analyse (1-4): ").strip()
+    run(choice)

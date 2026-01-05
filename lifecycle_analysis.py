@@ -191,16 +191,8 @@ class LifecycleAnalysis(Static_Analysis):
             f.write(self.lifecycle_log)
         print(f"\nAnalysis complete. Results saved to: {path}")
 
-def main():
-    # Options menu for manual selection
-    print("\n--- TDD Lifecycle Analysis Tool (Multi-threaded) ---")
-    print("1. Java")
-    print("2. Python")
-    print("3. C++")
-    print("4. All Languages")
-    
-    choice = input("\nSelect a language to analyse (1-4): ").strip()
-    
+def run(choice: str):
+    """Main function to run lifecycle analysis based on user choice."""
     # Map inputs to a list of languages to process
     language_map = {
         "1": [JAVA], 
@@ -229,4 +221,13 @@ def main():
         analyzer.write_lifecycle_log()
 
 if __name__ == "__main__":
-    main()
+    # Options menu for manual selection
+    print("\n--- TDD Lifecycle Analysis Tool (Multi-threaded) ---")
+    print("1. Java")
+    print("2. Python")
+    print("3. C++")
+    print("4. All Languages")
+    
+    choice = input("\nSelect a language to analyse (1-4): ").strip()
+
+    run(choice)
