@@ -4,10 +4,21 @@ import os
 # The number of commits to hold in memory before performing a bulk write to MongoDB.
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", "250")) 
 
+# --- SUPPORTED LANGUAGES ---
+# Supported programming languages for mining and analysis.
+LANGUAGES = ["Java", "Python", "C++"]
+JAVA, PYTHON, CPP = LANGUAGES
+LANGUAGE_MAP = {
+        "1": [JAVA], 
+        "2": [PYTHON], 
+        "3": [CPP],
+        "4": [JAVA, PYTHON, CPP]
+    }
+
+# ------ MINING CONFIG ------
 # --- WORKER CONFIG ---
 # Whether to print per-worker activity logs.
 SHOW_WORKER_ACTIVITY = os.getenv("SHOW_WORKER_ACTIVITY", "0") == "1"
-
 # Hard timeout for a single worker task (in seconds). Default: 45 minutes.
 WORKER_TIMEOUT = int(os.getenv("WORKER_TIMEOUT", "2700"))
 

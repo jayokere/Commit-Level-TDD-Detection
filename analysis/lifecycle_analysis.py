@@ -2,16 +2,29 @@
 Lifecycle Analysis for TDD Adoption.
 Analyzes how TDD patterns change across different stages of a project's maturity.
 """
-from analysis.static_analysis import Static_Analysis, JAVA, PYTHON, CPP
+import os
+import sys
+
+# Ensure parent directory is in sys.path for imports
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+
+from analysis.static_analysis import Static_Analysis
+from utilities.config import LANGUAGE_MAP
 from database.db import get_collection, COMMIT_COLLECTION, REPO_COLLECTION
 from pymongo.errors import PyMongoError
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import math
-import os
+from pathlib import Path
+
+# Compute project root (parent of analysis/ directory)
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # Constants for lifecycle analysis
 NUM_STAGES = 4  # Divide lifecycle into Quartiles (25% chunks)
-LIFECYCLE_OUTPUT_FILE = "analysis-output/{}_lifecycle_analysis.txt"
+LIFECYCLE_OUTPUT_FILE = str(PROJECT_ROOT / "analysis-output" / "{}_lifecycle_analysis.txt")
 MAX_THREADS = 60
 
 class LifecycleAnalysis(Static_Analysis):
@@ -98,9 +111,19 @@ class LifecycleAnalysis(Static_Analysis):
             stage_commits = self._fetch_commits_by_ids(stage_ids)
 
             # Detect TDD patterns
-            tdd_patterns = self.detect_tdd_in_commits(stage_commits)
+            tdd_patterns, _ = self.detect_tdd_in_commits(stage_commits)
+            
+            # Count unique commits that are part of TDD patterns (not pattern count)
+            # This prevents percentages > 100%
+            tdd_commit_hashes = set()
+            for pattern in tdd_patterns:
+                if pattern.get("test_commit"):
+                    tdd_commit_hashes.add(pattern["test_commit"])
+                # For diff-commit patterns, the test commit is the primary TDD indicator
+                # Don't count source_commit to avoid double-counting
+            
             if len(stage_commits) > 0:
-                stage_rate = (len(tdd_patterns) / len(stage_commits)) * 100
+                stage_rate = (len(tdd_commit_hashes) / len(stage_commits)) * 100
             else:
                 stage_rate = 0.0
 
@@ -193,19 +216,12 @@ class LifecycleAnalysis(Static_Analysis):
 
 def run(choice: str):
     """Main function to run lifecycle analysis based on user choice."""
-    # Map inputs to a list of languages to process
-    language_map = {
-        "1": [JAVA], 
-        "2": [PYTHON], 
-        "3": [CPP],
-        "4": [JAVA, PYTHON, CPP]
-    }
-    
-    if choice not in language_map:
+
+    if choice not in LANGUAGE_MAP:
         print("Invalid selection. Please run the script again and choose 1-4.")
         return
 
-    target_languages = language_map[choice]
+    target_languages = LANGUAGE_MAP[choice]
 
     # Database setup
     commits_col = get_collection(COMMIT_COLLECTION)

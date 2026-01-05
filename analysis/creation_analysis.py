@@ -17,6 +17,14 @@ Output:
 from __future__ import annotations
 
 import os
+import sys
+
+# Ensure parent directory is in sys.path for imports
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+    
 import re
 import time
 from collections import defaultdict
@@ -24,10 +32,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Set, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 
 from pymongo.errors import PyMongoError, NetworkTimeout, AutoReconnect
 from database.db import get_collection, COMMIT_COLLECTION, REPO_COLLECTION
-from analysis.static_analysis import Static_Analysis, JAVA, PYTHON, CPP
+from analysis.static_analysis import Static_Analysis
+from utilities.config import LANGUAGE_MAP
 
 
 # ----------------------------
@@ -189,9 +199,6 @@ class creation_analysis(Static_Analysis):
 
     def run(self) -> Totals:
         projects = self._get_project_names()
-        
-        # Limit to first 60 for consistency with other scripts
-        projects = projects[:60] 
 
         per_project: List[ProjectCounts] = []
         totals = Totals()
@@ -583,9 +590,11 @@ class creation_analysis(Static_Analysis):
             print()
 
     def _write_auditable_txt(self, totals: Totals, per_project: List[ProjectCounts], meta: Dict[str, int]) -> None:
-        out_dir = "analysis-output"
-        os.makedirs(out_dir, exist_ok=True)
-        path = os.path.join(out_dir, f"{self._language}_test_source_timing_audit.txt")
+        # Compute project root (parent of analysis/ directory)
+        project_root = Path(__file__).resolve().parent.parent
+        out_dir = project_root / "analysis-output"
+        out_dir.mkdir(exist_ok=True)
+        path = out_dir / f"{self._language}_test_source_timing_audit.txt"
 
         total = totals.paired_total
         before = totals.before
@@ -652,19 +661,12 @@ class creation_analysis(Static_Analysis):
 
 def run(choice: str) -> None:
     """Main function to run creation analysis based on user choice."""
-    # Map inputs to a list of languages to process
-    language_map = {
-        "1": [JAVA], 
-        "2": [PYTHON], 
-        "3": [CPP],
-        "4": [JAVA, PYTHON, CPP]
-    }
     
-    if choice not in language_map:
+    if choice not in LANGUAGE_MAP:
         print("Invalid selection. Please run the script again and choose 1-4.")
         return
 
-    target_languages = language_map[choice]
+    target_languages = LANGUAGE_MAP[choice]
 
     # Database setup
     commits = get_collection(COMMIT_COLLECTION)

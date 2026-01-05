@@ -2,22 +2,32 @@
 Check for TDD in separate commits. Check the current commit for the presence of a test file.
 If true, check the next commit for a related source file. If true, mark the second commit as tdd_in_diff_commit: True
 """
+
+import os
+import sys
+
+# Ensure parent directory is in sys.path for imports
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+
 from database.db import get_collection, COMMIT_COLLECTION, REPO_COLLECTION
 from bson.json_util import dumps
 from typing import List, Dict, Any, Optional, Set, Tuple
-import os
 import re
 from datetime import datetime
 # --- MULTITHREADING IMPORTS ---
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from utilities.config import LANGUAGE_MAP
 import threading
+from pathlib import Path
 
-STATIC_ANALYSIS_OUTPUT_FILE = "analysis-output/{}_static_analysis.txt"
+# Compute project root (parent of analysis/ directory)
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+STATIC_ANALYSIS_OUTPUT_FILE = str(PROJECT_ROOT / "analysis-output" / "{}_static_analysis.txt")
 SAMPLE_COUNT = 60
 HIGH_TDD_THRESHOLD = 35
-JAVA = "Java"
-PYTHON = "Python"
-CPP = "C++"
 
 commits = get_collection(COMMIT_COLLECTION)
 repos = get_collection(REPO_COLLECTION)
@@ -122,15 +132,20 @@ class Static_Analysis:
         # Detect patterns (this method now returns the log string too)
         tdd_patterns, detection_log = self.detect_tdd_in_commits(commits)
         
-        num_tdd_commits = len(tdd_patterns)
+        # Count unique commits that exhibit TDD (not pattern count)
+        tdd_commit_hashes = set()
+        for pattern in tdd_patterns:
+            if pattern.get("test_commit"):
+                tdd_commit_hashes.add(pattern["test_commit"])
+        num_tdd_commits = len(tdd_commit_hashes)
         
         # Build the log string locally
         local_log += f"\n{index}.) Checking TDD patterns for project \"{name}\"\n"
         local_log += f"Total commits in project \"{name}\": {total_commits}\n"
-        local_log += f"Detected TDD patterns ({len(tdd_patterns)} total):\n"
+        local_log += f"Detected TDD patterns ({len(tdd_patterns)} total, {num_tdd_commits} unique commits):\n"
         
         percentage = (num_tdd_commits / total_commits * 100) if total_commits > 0 else 0
-        local_log += f"TDD pattern percentage: {percentage:.2f}% ({len(tdd_patterns)}/{total_commits})\n"
+        local_log += f"TDD pattern percentage: {percentage:.2f}% ({num_tdd_commits}/{total_commits})\n"
         
         # Append the detailed detection logs
         local_log += detection_log
@@ -170,9 +185,17 @@ class Static_Analysis:
         tdd_patterns = []
         updated_hashes = set()
         log_buffer = "" # Accumulate logs here
+        
+        # Track which commits have been counted as TDD to prevent double-counting
+        tdd_commit_hashes = set()
 
         for i in range(len(commits_list)):
             current = commits_list[i]
+            current_hash = current.get("hash")
+            
+            # Skip if this commit was already counted as TDD
+            if current_hash in tdd_commit_hashes:
+                continue
             
             # 1) SAME-COMMIT TDD DETECTION
             if self._has_test_and_source_file(current):
@@ -196,11 +219,16 @@ class Static_Analysis:
                     "tdd_percentage": percent,
                     "mode": "same_commit"
                 })
+                
+                # Mark this commit as counted
+                if current_hash:
+                    tdd_commit_hashes.add(current_hash)
                 continue
 
             # 2) DIFF-COMMIT TDD DETECTION
             if i < len(commits_list) - 1:
                 next_commit = commits_list[i + 1]
+                next_hash = next_commit.get("hash")
 
                 if (self._has_test_files_only(current) and 
                     self._has_related_source_files(current, next_commit)):
@@ -230,6 +258,12 @@ class Static_Analysis:
                         "tdd_percentage": percent,
                         "mode": "diff_commit"
                     })
+                    
+                    # Mark ONLY the current (test) commit as counted for TDD
+                    # The next commit's source files are part of this pattern, but 
+                    # if it also has tests, it should still be eligible for its own pattern
+                    if current_hash:
+                        tdd_commit_hashes.add(current_hash)
 
         # Mark non-detected commits (if write enabled)
         if self._write_to_db:
@@ -349,11 +383,35 @@ class Static_Analysis:
         t_tok = self._method_tokens(test_m)
         s_tok = self._method_tokens(source_m)
         if not t_tok or not s_tok: return False
+        
+        # Primary signal: meaningful token intersection
         if t_tok.intersection(s_tok): return True
         
+        # Secondary: test tokens reference source basename tokens
         s_base = self._basename_tokens(source_f)
         if s_base and t_tok.intersection(s_base): return True
+        
+        # Tertiary: normalized test method equals a source method
+        normalized_test = [self._normalize_test_method_name(m) for m in test_m]
+        normalized_source = set(self._normalize_method_name(m) for m in source_m)
+        for tm in normalized_test:
+            if tm and tm in normalized_source:
+                return True
+        
         return False
+
+    @staticmethod
+    def _normalize_method_name(name: str) -> str:
+        return name.strip().lower()
+
+    @staticmethod
+    def _normalize_test_method_name(name: str) -> str:
+        n = name.strip().lower()
+        for p in ("test_", "test", "should_", "should", "when_", "when", "given_", "given"):
+            if n.startswith(p):
+                n = n[len(p):]
+                break
+        return n.strip("_")
 
     def _method_tokens(self, methods: List[str]) -> Set[str]:
         tokens = set()
@@ -398,22 +456,55 @@ class Static_Analysis:
         self._isVerbose = verbose
 
     def log_totals(self):
-        self.final_log += f"Analysis Date: {datetime.now()}\nTotal repositories analysed: {self.repos.count_documents({})}\nTotal commits analysed: {self.commits.count_documents({})}\n"
+        """Print the total number of repos and commits stored in the database."""
+        analysis_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        repo_count = self.repos.count_documents({})
+        commit_count = self.commits.count_documents({})
+        java_repo_count = self.repos.count_documents({"language": "Java"})
+        python_repo_count = self.repos.count_documents({"language": "Python"})
+        cpp_repo_count = self.repos.count_documents({"language": "C++"})
+        self.output_log += f"Analysis Date and Time: {analysis_datetime}\n"
+        self.output_log += f"Total repositories: {repo_count}\n"
+        self.output_log += f"Total commits: {commit_count}\n"
+        self.output_log += f"Total Java repositories: {java_repo_count}\n"
+        self.output_log += f"Total Python repositories: {python_repo_count}\n"
+        self.output_log += f"Total C++ repositories: {cpp_repo_count}\n"
 
     def log_final_analysis_results(self):
-        num_processed = len(self._tdd_adoption_rate_list)
-        avg_rate = (sum(self._tdd_adoption_rate_list) / num_processed) if num_processed > 0 else 0
-        overall_rate = (self._total_tdd_commits_count / self._total_commits_analysed_count * 100) if self._total_commits_analysed_count > 0 else 0
+        """Log comprehensive TDD metrics including average and global rates."""
+        num_projects_processed = len(self._tdd_adoption_rate_list)
         
-        self.final_log += f"\n{'='*30} FINAL RESULTS {'='*30}\nLanguage: {self._language}\nProjects Processed: {num_processed}\n"
-        self.final_log += f"Total {self._language} Commits: {self._total_commits_analysed_count}\nTotal TDD Commits: {self._total_tdd_commits_count}\n"
-        self.final_log += f"Projects with TDD: {self._projects_with_tdd_detected_count}\nAverage Adoption Rate: {avg_rate:.2f}%\nOverall Adoption Rate: {overall_rate:.2f}%\n{'='*75}\n"
+        # Calculation: Average of project percentages
+        avg_adoption_rate = (sum(self._tdd_adoption_rate_list) / num_projects_processed) if num_projects_processed > 0 else 0
+
+        # Calculation: Overall Language Adoption
+        overall_language_rate = (self._total_tdd_commits_count / self._total_commits_analysed_count * 100) if self._total_commits_analysed_count > 0 else 0
+
+        # Percentage of projects with > 0% TDD
+        any_tdd_rate = (self._projects_with_tdd_detected_count / num_projects_processed * 100) if num_projects_processed > 0 else 0
+        
+        # Percentage of projects with > threshold TDD
+        high_tdd_rate = (self._high_tdd_projects_count / num_projects_processed * 100) if num_projects_processed > 0 else 0
+
+        self.final_log += f"\n" + "="*30 + " FINAL RESULTS " + "="*30 + "\n"
+        self.final_log += f"Language: {self._language}\n"
+        self.final_log += f"Projects Processed: {num_projects_processed} (Sample Cap: {SAMPLE_COUNT})\n"
+        self.final_log += "-"*75 + "\n"
+        self.final_log += f"Total Commits across all projects: {self._total_commits_analysed_count}\n"
+        self.final_log += f"Total TDD Commits identified: {self._total_tdd_commits_count}\n"
+        self.final_log += "-"*75 + "\n"
+        self.final_log += f"Projects with ANY TDD detected (>0%): {self._projects_with_tdd_detected_count} ({any_tdd_rate:.2f}%)\n"
+        self.final_log += f"Projects with TDD adoption > ({HIGH_TDD_THRESHOLD}%): {self._high_tdd_projects_count} ({high_tdd_rate:.2f}%)\n"
+        self.final_log += "-"*75 + "\n"
+        self.final_log += f"Average TDD Adoption Rate (Mean of project %): {avg_adoption_rate:.2f}%\n"
+        self.final_log += f"Overall Language Adoption Rate (Total TDD / Total Commits): {overall_language_rate:.2f}%\n"
+        self.final_log += "="*75 + "\n"
 
         self.output_log += self.final_log
 
     def print_output_log(self):
         print("\n" + "=" * 80)
-        print(self.output_log)
+        print(self.final_log)
         print("=" * 80)
 
     def write_output_log(self, filepath: str = STATIC_ANALYSIS_OUTPUT_FILE):
@@ -429,19 +520,12 @@ class Static_Analysis:
 
 def run(choice: str) -> None:
     """Main function to run static analysis based on user choice."""
-    # Map inputs to a list of languages to process
-    language_map = {
-        "1": [JAVA], 
-        "2": [PYTHON], 
-        "3": [CPP],
-        "4": [JAVA, PYTHON, CPP]
-    }
     
-    if choice not in language_map:
+    if choice not in LANGUAGE_MAP:
         print("Invalid selection. Please run the script again and choose 1-4.")
         return
 
-    target_languages = language_map[choice]
+    target_languages = LANGUAGE_MAP[choice]
 
     for lang in target_languages:
         print(f"\nProcessing {lang} Static Analysis...")
