@@ -82,8 +82,7 @@ def num_source_files(project_name):
     repo = get_project(project_name)
     return count_files_github(repo['repo_url'])
 
-
-if __name__ == "__main__":
+def run_calculator():
     project_names = get_all_mined_project_names()
     print("Mined Projects:", len(project_names))
 
@@ -99,3 +98,6 @@ if __name__ == "__main__":
             print(f"Project: {project}, ERROR: {e}")
 
     print("Done.")
+
+if __name__ == "__main__":
+    run_calculator()

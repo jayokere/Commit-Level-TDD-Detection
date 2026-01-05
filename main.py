@@ -9,6 +9,7 @@ from db import get_collection
 from utils import measure_time
 from repo_miner import Repo_miner 
 from sync_counts import run_sync_counts
+from source_file_calculator import run_calculator
 
 # Main function
 @measure_time
@@ -27,6 +28,8 @@ def main() -> None:
 
     # Clean duplicate commits from Database
     clean_db()
+
+    run_calculator()
 
     run_sync_counts()
 
