@@ -37,7 +37,7 @@ class TestStaticAnalysis:
             source_files=["Calculator.java"]
         )
         
-        patterns = analyzer.detect_tdd_in_commits([c1])
+        patterns, _ = analyzer.detect_tdd_in_commits([c1])
         
         assert len(patterns) == 1
         assert patterns[0]['mode'] == 'same_commit'
@@ -58,7 +58,7 @@ class TestStaticAnalysis:
             source_files=["Calculator.java"]
         )
         
-        patterns = analyzer.detect_tdd_in_commits([c1, c2])
+        patterns, _ = analyzer.detect_tdd_in_commits([c1, c2])
         
         assert len(patterns) == 1
         p = patterns[0]
@@ -72,7 +72,7 @@ class TestStaticAnalysis:
         c1 = create_mock_commit("h1", "date", test_files=["TestA.java"], source_files=[])
         c2 = create_mock_commit("h2", "date", test_files=[], source_files=["ClassB.java"])
         
-        patterns = analyzer.detect_tdd_in_commits([c1, c2])
+        patterns, _ = analyzer.detect_tdd_in_commits([c1, c2])
         assert len(patterns) == 0
 
     def test_is_related_file_logic(self, analyzer):

@@ -37,7 +37,7 @@ def mock_db():
 
 @pytest.fixture
 def mock_pydriller():
-    with patch('worker.Repository') as mock_repo:
+    with patch('mining.worker.Repository') as mock_repo:
         yield mock_repo
 
 @pytest.fixture
@@ -48,7 +48,7 @@ def mock_file_analyser():
 
 @pytest.fixture
 def mock_executor():
-    with patch('repo_miner.ProcessPoolExecutor') as mock_pool:
+    with patch('mining.repo_miner.ProcessPoolExecutor') as mock_pool:
         executor_instance = MagicMock()
         mock_pool.return_value.__enter__.return_value = executor_instance
         yield executor_instance
@@ -158,6 +158,8 @@ def test_scheduler_prepare_job_cpp_api_success():
 
 # --- 3. Orchestrator Logic Tests (Split & Retry) ---
 
+# Inside repo_miner_test.py
+
 def test_run_logic_splits_on_timeout(mock_db, mock_executor):
     """
     CRITICAL TEST: Verifies that after 2 timeouts, the miner splits the job
@@ -177,17 +179,18 @@ def test_run_logic_splits_on_timeout(mock_db, mock_executor):
     f_retry1.result.return_value  = ('repo1', 0, 0, "TIMED OUT") 
     f_split_subtask.result.return_value = ('repo1', 5, 0, None)
 
-    # Sequence: 1. Initial (fail) -> 2. Retry (fail) -> 3...14 Split (success)
-    mock_executor.submit.side_effect = [f_initial, f_retry1] + [f_split_subtask] * 12
+    # Sequence: 1. Initial (fail) -> 2. Retry (fail) -> 3...Split (success)
+    # We need enough side effects for: Initial + Retry + All Sub Shards
+    mock_executor.submit.side_effect = [f_initial, f_retry1] + [f_split_subtask] * config.SUB_SHARDS
     
     def side_effect_wait(futures, return_when):
         f = list(futures)[0]
         return {f}, set()
 
-    with patch('repo_miner.wait', side_effect=side_effect_wait), \
-         patch('repo_miner.as_completed') as mock_as_completed, \
-         patch('repo_miner.prepare_job', return_value=[job_initial]), \
-         patch('repo_miner.ThreadPoolExecutor') as mock_thread_pool:
+    with patch('mining.repo_miner.wait', side_effect=side_effect_wait), \
+         patch('mining.repo_miner.as_completed') as mock_as_completed, \
+         patch('mining.repo_miner.prepare_job', return_value=[job_initial]), \
+         patch('mining.repo_miner.ThreadPoolExecutor') as mock_thread_pool:
          
         # Mock Phase 1
         mock_prep_future = MagicMock()
@@ -199,10 +202,11 @@ def test_run_logic_splits_on_timeout(mock_db, mock_executor):
         miner.run()
 
         # 4. ASSERTIONS
-        assert mock_executor.submit.call_count == 14
+        # FIX: Use config.SUB_SHARDS instead of hardcoded 12/14
+        expected_calls = 2 + config.SUB_SHARDS
+        assert mock_executor.submit.call_count == expected_calls
         
         # Check Depth increment on split (The 3rd call is the first split shard)
-        # Structure of submit args: (function_obj, (arg_tuple))
         args_split = mock_executor.submit.call_args_list[2][0]
         
         # Access the Worker Argument Tuple (index 1), then Depth (index 5)
@@ -223,9 +227,9 @@ def test_run_logic_stops_splitting_at_max_depth(mock_db, mock_executor):
         f = list(futures)[0]
         return {f}, set()
 
-    with patch('repo_miner.wait', side_effect=side_effect_wait), \
-         patch('repo_miner.prepare_job', return_value=[job_max_depth]), \
-         patch('repo_miner.ThreadPoolExecutor'):
+    with patch('mining.repo_miner.wait', side_effect=side_effect_wait), \
+         patch('mining.repo_miner.prepare_job', return_value=[job_max_depth]), \
+         patch('mining.repo_miner.ThreadPoolExecutor'):
         
         miner = Repo_miner()
         miner.run()
@@ -233,6 +237,8 @@ def test_run_logic_stops_splitting_at_max_depth(mock_db, mock_executor):
         # Verify no job was ever submitted with depth 4
         for call in mock_executor.submit.call_args_list:
             args = call[0]
-            # (name, url, start, end, lang, DEPTH, stop_event)
-            depth_arg = args[5]
+            # args is (function, (arg_tuple))
+            # FIX: Unpack the tuple argument (index 1) BEFORE accessing depth
+            worker_args = args[1]
+            depth_arg = worker_args[5]
             assert depth_arg == 3
