@@ -3,7 +3,7 @@ import sys
 import signal  # Added for timeout handling
 import time    # Added for sleep during retries
 from multiprocessing import Manager
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed, wait, FIRST_COMPLETED # Changed import for dynamic queue
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed, wait, FIRST_COMPLETED
 from tqdm import tqdm
 from pydriller import Repository
 from urllib.parse import urlparse
@@ -32,18 +32,6 @@ repo_miner.py
 Description:
     This script orchestrates the mining of GitHub repositories to extract specific software 
     engineering metrics (DMM, Cyclomatic Complexity, and Changed Methods).
-
-Key Features:
-    1. Multiprocessing: Utilises all available CPU cores to mine repositories in parallel.
-    2. Quota Management: Ensures exactly 60 projects per language are mined, skipping already 
-       completed projects to prevent redundancy.
-    3. Duplicate Prevention: Explicitly checks the database for existing commit hashes 
-       to allow resumable execution.
-    4. Metric Extraction: Extracts the Delta Maintainability Model (DMM) at the commit level 
-       and Cyclomatic Complexity at the file level.
-    5. Test Coverage Analysis: Analyzes test method names to identify which source files 
-       are being tested, addressing GitHub Issue #4 for improved TDD detection.
-    6. Language-Specific Mining: Restricts mining to files relevant to the project's language.
 """
 
 # The number of commits to hold in memory before performing a bulk write to MongoDB.
@@ -51,11 +39,12 @@ BATCH_SIZE = int(os.getenv("BATCH_SIZE", "250"))
 # Whether to print per-worker activity logs.
 SHOW_WORKER_ACTIVITY = os.getenv("SHOW_WORKER_ACTIVITY", "0") == "1"
 
-# --- NEW CONFIG ---
+# --- CONFIG ---
 # Hard timeout for a single worker task (in seconds). Default: 45 minutes.
 WORKER_TIMEOUT = int(os.getenv("WORKER_TIMEOUT", "2700"))
 # Maximum number of times to retry a shard if it times out.
 MAX_RETRIES = 3
+SUB_SHARDS = 12
 # ------------------
 
 class TimeoutException(Exception):
@@ -123,6 +112,7 @@ class Repo_miner:
         """
         Helper function to calculate shards for a single project.
         UPDATED: Splits C++ projects into 90-day chunks to prevent timeouts.
+        Includes 'depth=0' for infinite loop protection.
         """
         jobs = []
         
@@ -176,7 +166,8 @@ class Repo_miner:
                 if next_date > now:
                     next_date = now
 
-                jobs.append((name, raw_url, current_date, next_date, language))
+                # ADDED: 0 at the end represents 'depth'
+                jobs.append((name, raw_url, current_date, next_date, language, 0))
                 
                 # Move cursor forward
                 current_date = next_date
@@ -187,8 +178,9 @@ class Repo_miner:
             # -----------------------------------------------------
 
         else:
-            # Java/Python: Keep as one big job (or modify here if they start timing out too)
-            jobs.append((name, raw_url, None, None, language))
+            # Java/Python: Keep as one big job
+            # ADDED: 0 at the end represents 'depth'
+            jobs.append((name, raw_url, None, None, language, 0))
             
         return jobs
 
@@ -198,7 +190,8 @@ class Repo_miner:
         Worker function to mine a single repository (or shard of it).
         Executed in a separate process via ProcessPoolExecutor.
         """
-        project_name, raw_url, start_date, end_date, language, stop_event = args
+        # UPDATED: Unpack 'depth' to match new tuple structure
+        project_name, raw_url, start_date, end_date, language, depth, stop_event = args
         
         # Check if we should stop early (e.g. CTRL+C)
         if stop_event.is_set(): return None
@@ -219,7 +212,7 @@ class Repo_miner:
                 s_str = start_date.strftime('%Y-%m') if start_date else "START"
                 e_str = end_date.strftime('%Y-%m') if end_date else "NOW"
                 year_str = f"({s_str} to {e_str})"
-                tqdm.write(f"🚀 [Start] {project_name} {year_str} [{language}]")
+                tqdm.write(f"🚀 [Start] {project_name} {year_str} [{language}] (Depth: {depth})")
             
             # Initialise PyDriller with Date Partitioning (if dates provided)
             repo_obj = Repository(
@@ -264,7 +257,6 @@ class Repo_miner:
         total_projects = len(self.projects)
 
         # --- PHASE 1: PREPARATION (Multithreaded) ---
-        # We prepare shard dates in parallel because network requests (GitHub API) are slow.
         print(f"[INFO] Analysing {total_projects} repositories to determine shard dates...\n")
         
         monitor = ProgressMonitor(total_projects, label="PREPARING SHARDS")
@@ -330,8 +322,8 @@ class Repo_miner:
 
                 # 1. Submit initial jobs
                 for job_args in jobs:
-                    p_name, url, start, end, language = job_args
-                    f = executor.submit(self.mine_repo, (p_name, url, start, end, language, stop_event))
+                    # UPDATED: We unpack job_args within the call to ensure depth is included
+                    f = executor.submit(self.mine_repo, (*job_args, stop_event))
                     future_to_job[f] = job_args
 
                 completed_mining = 0
@@ -354,22 +346,59 @@ class Repo_miner:
                                 
                                 # --- RETRY LOGIC START ---
                                 if error and "TIMED OUT" in str(error):
+                                    retry_counts[job_data] += 1
                                     current_retries = retry_counts[job_data]
                                     
-                                    if current_retries < MAX_RETRIES:
-                                        retry_counts[job_data] += 1
-                                        delay = 5 * retry_counts[job_data]
+                                    # UPDATED: unpack depth from the current job_data (6 items)
+                                    p_name, url, start, end, language, depth = job_data
+                                    
+                                    if current_retries <= MAX_RETRIES:
+                                        # -- NEW SPLIT LOGIC ON 2ND RETRY: SPLIT INTO SUB SHARDS --
+                                        # UPDATED: Added check 'and depth < 3' to prevent infinite loop
+                                        if current_retries == 2 and start and end and depth < 3:
+                                            monitor.log(f"⚠️ {p_name} TIMED OUT again. Splitting shard (Depth {depth} -> {depth+1})...")
+                                            
+                                            total_duration = end - start
+                                            segment_duration = total_duration / SUB_SHARDS
+                                            
+                                            current_segment_start = start
+                                            
+                                            # Create sub-shards
+                                            for _ in range(SUB_SHARDS):
+                                                segment_end = current_segment_start + segment_duration
+                                                
+                                                # Ensure we don't slightly overshoot due to float precision
+                                                if segment_end > end: 
+                                                    segment_end = end
+                                                    
+                                                # UPDATED: Increment depth (depth + 1)
+                                                new_job = (p_name, url, current_segment_start, segment_end, language, depth + 1)
+                                                
+                                                # Reset retries for this new shard (Fresh start)
+                                                retry_counts[new_job] = 0
+                                                
+                                                # Submit new job
+                                                f_new = executor.submit(self.mine_repo, (*new_job, stop_event))
+                                                future_to_job[f_new] = new_job
+                                                
+                                                current_segment_start = segment_end
+
+                                            # Update tracking: Remove 1 old shard, add N new shards
+                                            shards_remaining[p_name] += SUB_SHARDS - 1
+                                            
+                                        else:
+                                            # Standard Retry (Same shard)
+                                            delay = 5 * current_retries
+                                            monitor.log(f"⚠️ {p_name} TIMED OUT. Retrying ({current_retries}/{MAX_RETRIES}) in {delay}s...")
+                                            time.sleep(delay)
+                                            
+                                            # Resubmit the exact same job
+                                            new_future = executor.submit(self.mine_repo, (*job_data, stop_event))
+                                            future_to_job[new_future] = job_data
                                         
-                                        monitor.log(f"⚠️ {p_name} TIMED OUT. Retrying ({retry_counts[job_data]}/{MAX_RETRIES}) in {delay}s...")
-                                        time.sleep(delay)
-                                        
-                                        # Re-submit job
-                                        p_name, url, start, end, language = job_data
-                                        new_future = executor.submit(self.mine_repo, (p_name, url, start, end, language, stop_event))
-                                        future_to_job[new_future] = job_data
                                         continue # Skip completion logic for this iteration
                                     else:
-                                        monitor.log(f"❌ {p_name} TIMED OUT. Max retries reached. Dropping shard.")
+                                        monitor.log(f"❌ {p_name} TIMED OUT. Max retries/depth reached. Dropping shard.")
                                         project_errors[p_name] = True
                                 # --- RETRY LOGIC END ---
 
