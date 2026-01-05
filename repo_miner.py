@@ -1,19 +1,16 @@
 import os
-import sys
-import signal  # Added for timeout handling
-import time    # Added for sleep during retries
+import time
+import random
 from multiprocessing import Manager
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed, wait, FIRST_COMPLETED
-from tqdm import tqdm
-from pydriller import Repository
-from urllib.parse import urlparse
-import random
-from datetime import datetime, timedelta
-import requests
 from collections import defaultdict
 
 # Internal Modules
+import config
+from partitioner import prepare_job
+from worker import mine_repo
 from utils import measure_time
+from miner_intro import ProgressMonitor
 from db import (
     get_java_projects_to_mine,
     get_python_projects_to_mine,
@@ -22,52 +19,15 @@ from db import (
     get_completed_project_names,
     mark_project_as_completed
 )
-from miners import FileAnalyser, TestAnalyser, CommitProcessor
-from miner_intro import ProgressMonitor
-from miners.file_analyser import VALID_CODE_EXTENSIONS
-
-"""
-repo_miner.py
-
-Description:
-    This script orchestrates the mining of GitHub repositories to extract specific software 
-    engineering metrics (DMM, Cyclomatic Complexity, and Changed Methods).
-"""
-
-# The number of commits to hold in memory before performing a bulk write to MongoDB.
-BATCH_SIZE = int(os.getenv("BATCH_SIZE", "250")) 
-# Whether to print per-worker activity logs.
-SHOW_WORKER_ACTIVITY = os.getenv("SHOW_WORKER_ACTIVITY", "0") == "1"
-
-# --- CONFIG ---
-# Hard timeout for a single worker task (in seconds). Default: 45 minutes.
-WORKER_TIMEOUT = int(os.getenv("WORKER_TIMEOUT", "2700"))
-# Maximum number of times to retry a shard if it times out.
-MAX_RETRIES = 3
-SUB_SHARDS = 12
-# ------------------
-
-class TimeoutException(Exception):
-    """Custom exception for worker timeout."""
-    pass
-
-def timeout_handler(signum, frame):
-    """Signal handler to raise a TimeoutException."""
-    raise TimeoutException("Task exceeded maximum execution time.")
 
 class Repo_miner:
     """
     Main controller class for the repository mining programme.
     """
     def __init__(self):
-        """
-        Initialises the miner by calculating quotas and sampling projects.
-        """
         print("Fetching project list and checking existing quotas...")
         
-        # Get list of already completed projects from DB to avoid re-mining
         already_mined = get_completed_project_names()
-        
         self.projects = []
         
         def fill_quota(candidates, language_name, target_quota=60):
@@ -81,8 +41,6 @@ class Repo_miner:
             
             needed = target_quota - current_count
             available = [p for p in candidates if p['name'] not in already_mined]
-            
-            # If we have more available than needed, sample randomly. Otherwise take all.
             count_to_take = min(len(available), needed)
             
             if count_to_take == 0:
@@ -92,178 +50,25 @@ class Repo_miner:
             print(f"   -> Queuing {count_to_take} new {language_name} repositories...")
             return random.sample(available, count_to_take)
 
-        # Fill quotas for each language
         self.projects.extend(fill_quota(get_java_projects_to_mine(), "Java"))
         self.projects.extend(fill_quota(get_python_projects_to_mine(), "Python"))
         self.projects.extend(fill_quota(get_cpp_projects_to_mine(), "C++"))
 
         print(f"\n[Job Summary] Mining {len(self.projects)} new repositories in this run.\n")
 
-    @staticmethod
-    def clean_url(url):
-        if not url: return None
-        url = url.strip().rstrip('/')
-        if "github.com:" in url and "github.com:443" not in url:
-            url = url.replace("github.com:", "github.com/")
-        return url
-    
-    @staticmethod
-    def _prepare_job(project):
-        """
-        Helper function to calculate shards for a single project.
-        UPDATED: Splits C++ projects into 90-day chunks to prevent timeouts.
-        Includes 'depth=0' for infinite loop protection.
-        """
-        jobs = []
-        
-        name = project.get('name')
-        raw_url = project.get('repo_url') or project.get('url')
-        language = project.get('language')
-
-        if isinstance(raw_url, list) and len(raw_url) > 0:
-            raw_url = raw_url[0]
-        
-        if not (isinstance(raw_url, str) and raw_url):
-            return []
-
-        start_year = 2000
-        
-        # Special handling for C++: Fetch creation date from API
-        if language == 'C++':
-            try:
-                if raw_url:
-                    parsed_url = urlparse(raw_url)
-                    hostname = parsed_url.hostname.lower() if parsed_url.hostname else None
-                    if hostname in ("github.com", "www.github.com"):
-                        parts = raw_url.strip("/").split("/")
-                        if len(parts) >= 2:
-                            owner, repo = parts[-2], parts[-1]
-                            api_url = f"https://api.github.com/repos/{owner}/{repo}"
-                            token = os.getenv('GITHUB_TOKEN') 
-                            headers = {}
-                            if token:
-                                headers['Authorization'] = f'token {token}'
-
-                            response = requests.get(api_url, headers=headers, timeout=5)
-                            if response.status_code == 200:
-                                data = response.json()
-                                created_at = data.get("created_at")
-                                if created_at:
-                                    start_year = int(created_at[:4])
-            except Exception:
-                print(f"⚠️ Warning: Could not fetch creation date for {name}. Using default start year {start_year}.")
-                pass
-
-            # --- NEW LOGIC: Split by years ---
-            current_date = datetime(start_year, 1, 1)
-            now = datetime.now()
-
-            while current_date < now:
-                # Calculate end of this shard (1 year later)
-                next_date = current_date + timedelta(days=365)
-                
-                # Cap the end date at 'now' so we don't mine the future
-                if next_date > now:
-                    next_date = now
-
-                # ADDED: 0 at the end represents 'depth'
-                jobs.append((name, raw_url, current_date, next_date, language, 0))
-                
-                # Move cursor forward
-                current_date = next_date
-                
-                # specific break to ensure we don't loop infinitely if next_date isn't advancing (safety)
-                if current_date >= now:
-                    break
-            # -----------------------------------------------------
-
-        else:
-            # Java/Python: Keep as one big job
-            # ADDED: 0 at the end represents 'depth'
-            jobs.append((name, raw_url, None, None, language, 0))
-            
-        return jobs
-
-    @staticmethod
-    def mine_repo(args):
-        """
-        Worker function to mine a single repository (or shard of it).
-        Executed in a separate process via ProcessPoolExecutor.
-        """
-        # UPDATED: Unpack 'depth' to match new tuple structure
-        project_name, raw_url, start_date, end_date, language, depth, stop_event = args
-        
-        # Check if we should stop early (e.g. CTRL+C)
-        if stop_event.is_set(): return None
-
-        # --- TIMEOUT SETUP ---
-        signal.signal(signal.SIGALRM, timeout_handler)
-        signal.alarm(WORKER_TIMEOUT)
-        # ---------------------
-
-        repo_url = Repo_miner.clean_url(raw_url)
-        if not repo_url:
-            signal.alarm(0) # Disable alarm
-            return (project_name, 0, 0, "Skipped: Invalid or missing URL")
-
-        try:
-            year_str = f""
-            if SHOW_WORKER_ACTIVITY:
-                s_str = start_date.strftime('%Y-%m') if start_date else "START"
-                e_str = end_date.strftime('%Y-%m') if end_date else "NOW"
-                year_str = f"({s_str} to {e_str})"
-                tqdm.write(f"🚀 [Start] {project_name} {year_str} [{language}] (Depth: {depth})")
-            
-            # Initialise PyDriller with Date Partitioning (if dates provided)
-            repo_obj = Repository(
-                repo_url,
-                since=start_date,
-                to=end_date,
-                only_modifications_with_file_types=list(VALID_CODE_EXTENSIONS)
-            )
-            
-            processor = CommitProcessor(batch_size=BATCH_SIZE)
-            new_commits_mined, initial_count = processor.process_commits(
-                repo_obj, 
-                project_name, 
-                repo_url,
-                language=language
-            )
-            
-            if SHOW_WORKER_ACTIVITY:
-                if new_commits_mined > 0:
-                    tqdm.write(f"✅ [Done] {project_name} {year_str}: {new_commits_mined} commits.")
-        
-            return (project_name, new_commits_mined, initial_count, None)
-            
-        except TimeoutException:
-            # Return specific key string to trigger retry logic
-            return (project_name, 0, 0, "TIMED OUT")
-            
-        except Exception as e:
-            # Generic error (network, git clone fail, etc.)
-            return (project_name, 0, 0, str(e))
-            
-        finally:
-            # Ensure the alarm is disabled once the function exits
-            signal.alarm(0)
-
     @measure_time
     def run(self):
-        """
-        Main execution flow using custom 'miner_intro' progress bars.
-        """
         jobs = []
         total_projects = len(self.projects)
 
         # --- PHASE 1: PREPARATION (Multithreaded) ---
         print(f"[INFO] Analysing {total_projects} repositories to determine shard dates...\n")
-        
         monitor = ProgressMonitor(total_projects, label="PREPARING SHARDS")
         monitor.start()
 
         with ThreadPoolExecutor(max_workers=20) as preparer:
-            future_to_project = {preparer.submit(self._prepare_job, p): p for p in self.projects}
+            # Use external scheduler function
+            future_to_project = {preparer.submit(prepare_job, p): p for p in self.projects}
             completed_prep = 0
             for future in as_completed(future_to_project):
                 try:
@@ -284,8 +89,6 @@ class Repo_miner:
         total_jobs = len(jobs)
         shards_remaining = defaultdict(int)
         project_errors = defaultdict(bool) 
-
-        # Track retry attempts: job_args_tuple -> attempt_count
         retry_counts = defaultdict(int)
 
         for j in jobs:
@@ -293,17 +96,10 @@ class Repo_miner:
             shards_remaining[p_name] += 1
 
         print(f"\n[INFO] Preparation complete. Starting parallel mining with {total_jobs} segments.")
-        print(f"[INFO] Worker Timeout: {WORKER_TIMEOUT}s | Max Retries: {MAX_RETRIES}")
+        print(f"[INFO] Worker Timeout: {config.WORKER_TIMEOUT}s | Max Retries: {config.MAX_RETRIES}")
 
-        # Determine optimal worker count
         env_max = os.getenv("MAX_WORKERS")
-        if env_max and env_max.isdigit():
-            max_workers = int(env_max)
-        else:
-            # Default to 2x CPU count (IO bound-ish due to network/disk)
-            max_workers = (os.cpu_count() or 6) * 2
-        
-        # Don't spawn more workers than jobs
+        max_workers = int(env_max) if env_max and env_max.isdigit() else (os.cpu_count() or 6) * 2
         max_workers = max(1, min(total_jobs, max_workers))
         
         print(f"[INFO] Using {max_workers} worker processes\n")
@@ -312,26 +108,21 @@ class Repo_miner:
         monitor.start()
         
         with Manager() as manager:
-            # Shared event to signal all workers to stop (e.g. on Ctrl+C)
             stop_event = manager.Event()
             
             with ProcessPoolExecutor(max_workers=max_workers) as executor:
-                # We use a dict to map Futures back to their job arguments
-                # so we can re-submit them if they timeout.
                 future_to_job = {}
 
                 # 1. Submit initial jobs
                 for job_args in jobs:
-                    # UPDATED: We unpack job_args within the call to ensure depth is included
-                    f = executor.submit(self.mine_repo, (*job_args, stop_event))
+                    # Pass external worker function
+                    f = executor.submit(mine_repo, (*job_args, stop_event))
                     future_to_job[f] = job_args
 
                 completed_mining = 0
                 
                 try:
-                    # 2. Dynamic loop to handle results as they arrive
                     while future_to_job:
-                        # Wait for at least one future to complete
                         done, _ = wait(future_to_job.keys(), return_when=FIRST_COMPLETED)
                         
                         for future in done:
@@ -344,88 +135,73 @@ class Repo_miner:
 
                                 _, added, _, error = result
                                 
-                                # --- RETRY LOGIC START ---
+                                # --- RETRY LOGIC ---
                                 if error and "TIMED OUT" in str(error):
                                     retry_counts[job_data] += 1
                                     current_retries = retry_counts[job_data]
                                     
-                                    # UPDATED: unpack depth from the current job_data (6 items)
+                                    # Unpack including depth
                                     p_name, url, start, end, language, depth = job_data
                                     
-                                    if current_retries <= MAX_RETRIES:
-                                        # -- NEW SPLIT LOGIC ON 2ND RETRY: SPLIT INTO SUB SHARDS --
-                                        # UPDATED: Added check 'and depth < 3' to prevent infinite loop
-                                        if current_retries == 2 and start and end and depth < 3:
-                                            monitor.log(f"⚠️ {p_name} TIMED OUT again. Splitting shard (Depth {depth} -> {depth+1})...")
+                                    if current_retries <= config.MAX_RETRIES:
+                                        # Split Check: Retries == 2 AND Depth < Limit
+                                        if current_retries == 2 and start and end and depth < config.MAX_SPLIT_DEPTH:
+                                            monitor.log(f"⚠️ {p_name} TIMED OUT. Splitting (Depth {depth} -> {depth+1})...")
                                             
                                             total_duration = end - start
-                                            segment_duration = total_duration / SUB_SHARDS
-                                            
+                                            segment_duration = total_duration / config.SUB_SHARDS
                                             current_segment_start = start
                                             
-                                            # Create sub-shards
-                                            for _ in range(SUB_SHARDS):
+                                            for _ in range(config.SUB_SHARDS):
                                                 segment_end = current_segment_start + segment_duration
-                                                
-                                                # Ensure we don't slightly overshoot due to float precision
-                                                if segment_end > end: 
-                                                    segment_end = end
+                                                if segment_end > end: segment_end = end
                                                     
-                                                # UPDATED: Increment depth (depth + 1)
+                                                # Create new job with INCREMENTED DEPTH
                                                 new_job = (p_name, url, current_segment_start, segment_end, language, depth + 1)
-                                                
-                                                # Reset retries for this new shard (Fresh start)
                                                 retry_counts[new_job] = 0
                                                 
-                                                # Submit new job
-                                                f_new = executor.submit(self.mine_repo, (*new_job, stop_event))
+                                                f_new = executor.submit(mine_repo, (*new_job, stop_event))
                                                 future_to_job[f_new] = new_job
-                                                
                                                 current_segment_start = segment_end
 
-                                            # Update tracking: Remove 1 old shard, add N new shards
-                                            shards_remaining[p_name] += SUB_SHARDS - 1
+                                            shards_remaining[p_name] += config.SUB_SHARDS - 1
                                             
                                         else:
-                                            # Standard Retry (Same shard)
+                                            # Standard Retry
                                             delay = 5 * current_retries
-                                            monitor.log(f"⚠️ {p_name} TIMED OUT. Retrying ({current_retries}/{MAX_RETRIES}) in {delay}s...")
+                                            monitor.log(f"⚠️ {p_name} TIMED OUT. Retrying ({current_retries}/{config.MAX_RETRIES})...")
                                             time.sleep(delay)
                                             
-                                            # Resubmit the exact same job
-                                            new_future = executor.submit(self.mine_repo, (*job_data, stop_event))
+                                            new_future = executor.submit(mine_repo, (*job_data, stop_event))
                                             future_to_job[new_future] = job_data
                                         
-                                        continue # Skip completion logic for this iteration
+                                        continue 
                                     else:
-                                        monitor.log(f"❌ {p_name} TIMED OUT. Max retries/depth reached. Dropping shard.")
+                                        monitor.log(f"❌ {p_name} TIMED OUT. Max retries/depth reached.")
                                         project_errors[p_name] = True
-                                # --- RETRY LOGIC END ---
+                                # -------------------
 
                                 if added > 0:
                                     monitor.log(f"✅ {p_name}: {added} new commits mined.")
                                 
-                                # Any other error (or exhausted retries)
                                 if error and "TIMED OUT" not in str(error) and "No commits found" not in str(error):
                                     monitor.log(f"❌ {p_name}: {error}")
                                     project_errors[p_name] = True
                                 
                                 shards_remaining[p_name] -= 1
 
-                                # If 0 shards remain AND no errors occurred, mark as "completed" in DB
                                 if shards_remaining[p_name] == 0:
                                     if not project_errors[p_name]:
                                         mark_project_as_completed(p_name)
                                         monitor.log(f"🏆 {p_name} FULLY COMPLETED.")
                                     else:
-                                        monitor.log(f"⚠️ {p_name} finished with errors (not complete).")
+                                        monitor.log(f"⚠️ {p_name} finished with errors.")
 
                                 completed_mining += 1
                                 monitor.update(completed_mining)
 
                             except Exception as exc:
-                                # Start logging critical worker failures
-                                monitor.log(f"❌ Critical exception in worker for {p_name}: {exc}")
+                                monitor.log(f"❌ Critical worker exception: {exc}")
                                 shards_remaining[p_name] -= 1
                                 completed_mining += 1
                                 monitor.update(completed_mining)
@@ -437,12 +213,10 @@ class Repo_miner:
                     for f in future_to_job.keys():
                         f.cancel()
             
-            # Stop monitor if not already stopped
             if monitor.running:
                 monitor.stop()
         
-        print("\n") 
-        print("[DB] Optimising database indices...")
+        print("\n[DB] Optimising database indices...")
         ensure_indexes()
         print("[SUCCESS] Cycle complete.")
 
