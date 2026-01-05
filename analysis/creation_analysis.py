@@ -24,7 +24,7 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
-    
+
 import re
 import time
 from collections import defaultdict
@@ -95,7 +95,7 @@ class creation_analysis(Static_Analysis):
         meta = []
         for attempt in range(max_retries):
             try:
-                # batch_size(2000) ensures we get smaller, faster responses from the server
+                # batch_size(200) ensures we get smaller, faster responses from the server
                 # preventing the 30s read timeout on slow networks/large docs
                 cursor = self.commits.find(
                     {"project": project_name},
