@@ -2,9 +2,9 @@ import signal
 import os
 from tqdm import tqdm
 from pydriller import Repository
-from miners import CommitProcessor
-from miners.file_analyser import VALID_CODE_EXTENSIONS
-import config
+from mining.components import CommitProcessor
+from mining.components.file_analyser import VALID_CODE_EXTENSIONS
+from utilities import config
 
 class TimeoutException(Exception):
     """Custom exception for worker timeout."""

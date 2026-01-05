@@ -7,8 +7,8 @@ This addresses GitHub Issue #4 by showing how the code correctly identifies:
 
 import pytest
 from unittest.mock import MagicMock
-from repo_miner import Repo_miner
-from miners import TestAnalyser
+from mining.repo_miner import Repo_miner
+from mining.components import TestAnalyser
 
 
 class TestFileDetectionScenarios:

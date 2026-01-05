@@ -12,9 +12,9 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 # Internal Utils
-import db
-import miner_intro 
-from utils import measure_time, ping_target
+from database import db
+from utilities import miner_intro 
+from utilities.utils import measure_time, ping_target
 
 try:
     from dotenv import load_dotenv

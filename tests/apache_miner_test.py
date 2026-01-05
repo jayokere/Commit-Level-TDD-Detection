@@ -26,12 +26,12 @@ mock_utils.measure_time.side_effect = pass_through_decorator
 mock_utils.ping_target.return_value = True 
 
 # 3. Inject mocks into sys.modules
-sys.modules['db'] = mock_db
-sys.modules['miner_intro'] = mock_intro
-sys.modules['utils'] = mock_utils
+sys.modules['database.db'] = mock_db
+sys.modules['utilities.miner_intro'] = mock_intro
+sys.modules['utilities.utils'] = mock_utils
 
 # Now safe to import the actual miner
-from apache_miner import ApacheGitHubMiner, RateLimitExceededError
+from mining.apache_miner import ApacheGitHubMiner, RateLimitExceededError
 
 class TestApacheGitHubMiner(unittest.TestCase):
 

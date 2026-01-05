@@ -1,26 +1,26 @@
 import pytest
 from unittest.mock import MagicMock, patch, PropertyMock, ANY
 from datetime import datetime
-import config
+from utilities import config
 
 # Imports
-from repo_miner import Repo_miner
-from worker import mine_repo, clean_url
-import partitioner # Import module explicitly for patch.object
+from mining.repo_miner import Repo_miner
+from mining.worker import mine_repo, clean_url
+from mining import partitioner # Import module explicitly for patch.object
 
 # --- Fixtures ---
 
 @pytest.fixture
 def mock_db():
     """Mocks the database functions to prevent real DB connections."""
-    with patch('repo_miner.get_java_projects_to_mine') as mock_java, \
-         patch('repo_miner.get_python_projects_to_mine') as mock_python, \
-         patch('repo_miner.get_cpp_projects_to_mine') as mock_cpp, \
-         patch('repo_miner.get_completed_project_names') as mock_completed_names, \
-         patch('repo_miner.mark_project_as_completed') as mock_mark_completed, \
-         patch('miners.commit_processor.get_existing_commit_hashes') as mock_hashes, \
-         patch('miners.commit_processor.save_commit_batch') as mock_save, \
-         patch('repo_miner.ensure_indexes') as mock_indexes:
+    with patch('mining.repo_miner.get_java_projects_to_mine') as mock_java, \
+         patch('mining.repo_miner.get_python_projects_to_mine') as mock_python, \
+         patch('mining.repo_miner.get_cpp_projects_to_mine') as mock_cpp, \
+         patch('mining.repo_miner.get_completed_project_names') as mock_completed_names, \
+         patch('mining.repo_miner.mark_project_as_completed') as mock_mark_completed, \
+         patch('mining.components.commit_processor.get_existing_commit_hashes') as mock_hashes, \
+         patch('mining.components.commit_processor.save_commit_batch') as mock_save, \
+         patch('mining.repo_miner.ensure_indexes') as mock_indexes:
         
         mock_java.return_value = []
         mock_python.return_value = []
@@ -42,7 +42,7 @@ def mock_pydriller():
 
 @pytest.fixture
 def mock_file_analyser():
-    with patch('miners.file_analyser.FileAnalyser') as mock_fa:
+    with patch('mining.components.file_analyser.FileAnalyser') as mock_fa:
         mock_fa.get_extensions_for_language.return_value = {'.java'}
         yield mock_fa
 

@@ -3,7 +3,7 @@ import pytest
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-import source_file_calculator as sfc
+import analysis.source_file_calculator as sfc
 
 
 def test_parse_github_url_valid():

@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import MagicMock
-from lifecycle_analysis import LifecycleAnalysis
+from analysis.lifecycle_analysis import LifecycleAnalysis
 
 @pytest.fixture
 def lifecycle():

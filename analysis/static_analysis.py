@@ -2,7 +2,7 @@
 Check for TDD in separate commits. Check the current commit for the presence of a test file.
 If true, check the next commit for a related source file. If true, mark the second commit as tdd_in_diff_commit: True
 """
-from db import get_collection, COMMIT_COLLECTION, REPO_COLLECTION
+from database.db import get_collection, COMMIT_COLLECTION, REPO_COLLECTION
 from bson.json_util import dumps
 from typing import List, Dict, Any, Optional, Set, Tuple
 import os

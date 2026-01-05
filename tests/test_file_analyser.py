@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import MagicMock
-from miners.file_analyser import FileAnalyser, VALID_CODE_EXTENSIONS
+from mining.components.file_analyser import FileAnalyser, VALID_CODE_EXTENSIONS
 
 class TestFileAnalyser:
     

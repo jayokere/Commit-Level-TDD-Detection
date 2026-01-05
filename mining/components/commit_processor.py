@@ -4,7 +4,7 @@ Core commit processing utilities for traversing repositories and extracting metr
 
 from .file_analyser import FileAnalyser
 from .test_analyser import TestAnalyser
-from db import get_existing_commit_hashes, save_commit_batch
+from database.db import get_existing_commit_hashes, save_commit_batch
 
 
 class CommitProcessor:

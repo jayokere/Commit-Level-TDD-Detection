@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import MagicMock
-from miners.test_analyser import TestAnalyser
+from mining.components.test_analyser import TestAnalyser
 
 class TestTestAnalyser:
 

@@ -2,8 +2,8 @@
 Lifecycle Analysis for TDD Adoption.
 Analyzes how TDD patterns change across different stages of a project's maturity.
 """
-from static_analysis import Static_Analysis, JAVA, PYTHON, CPP
-from db import get_collection, COMMIT_COLLECTION, REPO_COLLECTION
+from analysis.static_analysis import Static_Analysis, JAVA, PYTHON, CPP
+from database.db import get_collection, COMMIT_COLLECTION, REPO_COLLECTION
 from pymongo.errors import PyMongoError
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import math

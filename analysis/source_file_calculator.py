@@ -2,7 +2,7 @@ import os
 import requests
 from urllib.parse import urlparse
 
-from db import get_collection, get_project, update_project
+from database.db import get_collection, get_project, update_project
 
 COMMITS_COLLECTION = "mined-commits"
 SOURCE_EXTENSIONS = ('.java', '.py', '.cpp')

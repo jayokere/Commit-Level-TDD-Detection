@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import MagicMock, patch
-from static_analysis import Static_Analysis
+from analysis.static_analysis import Static_Analysis
 
 @pytest.fixture
 def analyzer():

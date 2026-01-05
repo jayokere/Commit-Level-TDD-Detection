@@ -2,7 +2,7 @@ import csv
 from pathlib import Path
 from typing import Any, Dict, List
 
-from db import get_collection  
+from database.db import get_collection  
 
 COMMITS_COLLECTION_NAME = "mined-commits"  
 OUTPUT_PATH = Path(__file__).resolve().parent / "analysis-output" / "project_years.csv"

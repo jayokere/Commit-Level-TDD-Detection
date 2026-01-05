@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import MagicMock
 from datetime import datetime
-from creation_analysis import creation_analysis
+from analysis.creation_analysis import creation_analysis
 
 @pytest.fixture
 def creation_analyzer():

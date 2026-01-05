@@ -26,8 +26,8 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from pymongo.errors import PyMongoError, NetworkTimeout, AutoReconnect
-from db import get_collection, COMMIT_COLLECTION, REPO_COLLECTION
-from static_analysis import Static_Analysis, JAVA, PYTHON, CPP
+from database.db import get_collection, COMMIT_COLLECTION, REPO_COLLECTION
+from analysis.static_analysis import Static_Analysis, JAVA, PYTHON, CPP
 
 
 # ----------------------------

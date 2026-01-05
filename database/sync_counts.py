@@ -1,6 +1,6 @@
 import os
 from pymongo import UpdateOne
-from db import get_collection, REPO_COLLECTION, COMMIT_COLLECTION
+from database.db import get_collection, REPO_COLLECTION, COMMIT_COLLECTION
 
 def sync_commit_counts():
     """

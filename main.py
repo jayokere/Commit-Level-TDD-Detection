@@ -2,17 +2,17 @@
 from pydriller import Repository
 
 # Internal Modules
-from miner_intro import run_all as miner_intro
-from apache_miner import run_all as apache_miner
-from clean_db import run as clean_db
-from db import get_collection
-from utils import measure_time
-from repo_miner import Repo_miner 
-from sync_counts import run_sync_counts
-from source_file_calculator import run_calculator
-from lifecycle_analysis import run as lifecycle_analysis
-from creation_analysis import run as creation_analysis
-from static_analysis import run as static_analysis
+from utilities.miner_intro import run_all as miner_intro
+from mining.apache_miner import run_all as apache_miner
+from database.clean_db import run as clean_db
+from database.db import get_collection
+from utilities.utils import measure_time
+from mining.repo_miner import Repo_miner 
+from database.sync_counts import run_sync_counts
+from analysis.source_file_calculator import run_calculator
+from analysis.lifecycle_analysis import run as lifecycle_analysis
+from analysis.creation_analysis import run as creation_analysis
+from analysis.static_analysis import run as static_analysis
 
 # Main function
 @measure_time

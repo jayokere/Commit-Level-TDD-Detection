@@ -6,12 +6,12 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_compl
 from collections import defaultdict
 
 # Internal Modules
-import config
-from partitioner import prepare_job
-from worker import mine_repo
-from utils import measure_time
-from miner_intro import ProgressMonitor
-from db import (
+from utilities import config
+from mining.partitioner import prepare_job
+from mining.worker import mine_repo
+from utilities.utils import measure_time
+from utilities.miner_intro import ProgressMonitor
+from database.db import (
     get_java_projects_to_mine,
     get_python_projects_to_mine,
     get_cpp_projects_to_mine, 

@@ -1,10 +1,10 @@
 import pytest
 from unittest.mock import MagicMock, patch, call
-import clean_db
+from database import clean_db
 
 class TestCleanDB:
 
-    @patch("clean_db.get_collection")
+    @patch("database.clean_db.get_collection")
     def test_clean_duplicates_logic(self, mock_get_col):
         mock_col = MagicMock()
         mock_get_col.return_value = mock_col

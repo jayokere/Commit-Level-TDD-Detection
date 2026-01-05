@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 # Paths
 # ============================================================
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent.parent
 ANALYSIS_DIR = ROOT / "analysis-output"
 CHARTS_DIR = ANALYSIS_DIR / "charts"
 CHARTS_DIR.mkdir(exist_ok=True)

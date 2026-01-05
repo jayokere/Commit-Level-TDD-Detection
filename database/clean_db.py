@@ -1,7 +1,7 @@
 import sys
 from tqdm import tqdm
 from pymongo import DeleteOne
-from db import get_collection, COMMIT_COLLECTION
+from database.db import get_collection, COMMIT_COLLECTION
 
 def clean_duplicates():
     """
