@@ -26,22 +26,25 @@ mock_utils.measure_time.side_effect = pass_through_decorator
 mock_utils.ping_target.return_value = True 
 
 # 3. Inject mocks into sys.modules
-sys.modules['db'] = mock_db
-sys.modules['miner_intro'] = mock_intro
-sys.modules['utils'] = mock_utils
+mock_db.APACHE_COLLECTION = "apache-repos"
+sys.modules['database.db'] = mock_db
+sys.modules['utilities.miner_intro'] = mock_intro
+sys.modules['utilities.utils'] = mock_utils
 
 # Now safe to import the actual miner
-from apache_miner import ApacheGitHubMiner, RateLimitExceededError
+from mining.apache_miner import ApacheGitHubMiner, RateLimitExceededError
 
 class TestApacheGitHubMiner(unittest.TestCase):
 
     def setUp(self):
         """Set up a fresh miner instance before every test."""
-        # Reset the DB mock calls to ensure a clean slate for each test
         mock_db.reset_mock()
         
         with patch.dict(os.environ, {"GITHUB_TOKEN": "fake-token"}):
             self.miner = ApacheGitHubMiner(num_threads=1)
+            # We must mock the mount method on the INSTANCE's session, 
+            # or patch Session completely. The existing code is fine 
+            # as long as requests is patched correctly below.
             self.miner.session.mount = MagicMock()
 
     def test_init_sets_headers(self):
@@ -83,7 +86,8 @@ class TestApacheGitHubMiner(unittest.TestCase):
     # -------------------------------------------------------------------------
     # Repo Count
     # -------------------------------------------------------------------------
-    @patch('apache_miner.requests.Session.get')
+    # FIX: Added 'mining.' prefix to patch
+    @patch('mining.apache_miner.requests.Session.get')
     def test_get_total_org_repos_success(self, mock_get):
         mock_response = MagicMock()
         mock_response.status_code = 200
@@ -91,7 +95,8 @@ class TestApacheGitHubMiner(unittest.TestCase):
         mock_get.return_value = mock_response
         self.assertEqual(self.miner.get_total_org_repos(), 150)
 
-    @patch('apache_miner.requests.Session.get')
+    # FIX: Added 'mining.' prefix to patch
+    @patch('mining.apache_miner.requests.Session.get')
     def test_get_total_org_repos_failure(self, mock_get):
         mock_response = MagicMock()
         mock_response.status_code = 404 
@@ -101,7 +106,8 @@ class TestApacheGitHubMiner(unittest.TestCase):
     # -------------------------------------------------------------------------
     # Fetch Page
     # -------------------------------------------------------------------------
-    @patch('apache_miner.requests.Session.get')
+    # FIX: Added 'mining.' prefix to patch
+    @patch('mining.apache_miner.requests.Session.get')
     def test_fetch_page_filtering(self, mock_get):
         mock_response = MagicMock()
         mock_response.status_code = 200
@@ -123,16 +129,17 @@ class TestApacheGitHubMiner(unittest.TestCase):
     # -------------------------------------------------------------------------
     # Commit Counting
     # -------------------------------------------------------------------------
-    @patch('apache_miner.requests.Session.get')
+    # FIX: Added 'mining.' prefix to patch
+    @patch('mining.apache_miner.requests.Session.get')
     def test_get_commit_count_pagination_trick(self, mock_get):
         mock_response = MagicMock()
         mock_response.status_code = 200
-        # Correctly formatted URL param for the regex to find
         mock_response.headers = {'Link': '<https://api.github.com/commits?per_page=1&page=500>; rel="last"'}
         mock_get.return_value = mock_response
         self.assertEqual(self.miner.get_commit_count("http://fake.api"), 500)
 
-    @patch('apache_miner.requests.Session.get')
+    # FIX: Added 'mining.' prefix to patch
+    @patch('mining.apache_miner.requests.Session.get')
     def test_get_commit_count_small_repo(self, mock_get):
         mock_response = MagicMock()
         mock_response.status_code = 200
@@ -148,52 +155,45 @@ class TestApacheGitHubMiner(unittest.TestCase):
     # -------------------------------------------------------------------------
     # Orchestration
     # -------------------------------------------------------------------------
-    @patch('apache_miner.ping_target')
+    # FIX: Added 'mining.' prefix to patch
+    # Note: ping_target is imported into the module, so we must patch it in that namespace
+    @patch('mining.apache_miner.ping_target')
     def test_fetch_candidate_repos_aborts_on_ping_fail(self, mock_ping):
         mock_ping.return_value = False 
         self.assertEqual(self.miner.fetch_candidate_repos(), [])
 
-    @patch('apache_miner.ping_target')
-    @patch('apache_miner.ApacheGitHubMiner.get_total_org_repos')
+    # FIX: Added 'mining.' prefix to patch
+    @patch('mining.apache_miner.ping_target')
+    @patch('mining.apache_miner.ApacheGitHubMiner.get_total_org_repos')
     def test_fetch_candidate_repos_aborts_on_zero_repos(self, mock_get_total, mock_ping):
         mock_ping.return_value = True
         mock_get_total.return_value = 0 
         self.assertEqual(self.miner.fetch_candidate_repos(), [])
 
-    @patch('apache_miner.ApacheGitHubMiner.get_commit_count')
-    @patch('apache_miner.ApacheGitHubMiner.fetch_candidate_repos')
-    @patch('apache_miner.ThreadPool') 
+    # FIX: Added 'mining.' prefix to patch
+    @patch('mining.apache_miner.ApacheGitHubMiner.get_commit_count')
+    @patch('mining.apache_miner.ApacheGitHubMiner.fetch_candidate_repos')
+    @patch('mining.apache_miner.ThreadPool') 
     def test_run_success_flow(self, mock_threadpool, mock_fetch, mock_get_commits):
-        """
-        Test the main run loop.
-        """
         # 1. Setup Data
         mock_fetch.return_value = [
             {"name": "Repo1", "url": "u1", "api_url": "a1", "language": "Java"}
         ]
         
-        # 2. Mock ThreadPool
-        # Since ThreadPool is used as a Context Manager (with ... as pool:),
-        # we must mock the return value of __enter__.
         mock_pool_instance = mock_threadpool.return_value
         mock_pool_instance.__enter__.return_value = mock_pool_instance
         
         processed_result = {
             "name": "Repo1", "url": "u1", "language": "Java", "commits": 100
         }
-        # Now that we patched the correct object, this return value will actually be used
         mock_pool_instance.imap_unordered.return_value = [processed_result]
         
         # 3. Run
         self.miner.run()
         
         # 4. Assert
-        # Check that we fetched repos
         mock_fetch.assert_called_once()
-        
-        # Check that we SAVED to the DB.
-        # Ensure 'mock_db' is available in your test class scope or imported
-        mock_db.save_repo_batch.assert_called_once_with([processed_result], "mined-repos")
+        mock_db.save_repo_batch.assert_called_once_with([processed_result], "apache-repos")
         
 if __name__ == '__main__':
     unittest.main()

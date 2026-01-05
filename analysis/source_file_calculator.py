@@ -2,7 +2,7 @@ import os
 import requests
 from urllib.parse import urlparse
 
-from db import get_collection, get_project, update_project
+from database.db import get_collection, get_project, update_project
 
 COMMITS_COLLECTION = "mined-commits"
 SOURCE_EXTENSIONS = ('.java', '.py', '.cpp')
@@ -80,10 +80,13 @@ def num_source_files(project_name):
     Returns the total number of source files for a project using GitHub API.
     """
     repo = get_project(project_name)
+
+    if repo is None:
+        raise ValueError(f"Project '{project_name}' not found in the database.")
+
     return count_files_github(repo['repo_url'])
 
-
-if __name__ == "__main__":
+def run_calculator():
     project_names = get_all_mined_project_names()
     print("Mined Projects:", len(project_names))
 
@@ -91,6 +94,11 @@ if __name__ == "__main__":
         try:
             n = num_source_files(project)
             new_project = get_project(project)
+
+            if new_project is None:
+                print(f"Skipping {project}: Project details not found in DB.")
+                continue
+
             new_project['num_production_files'] = n[0]
             new_project['num_test_files'] = n[1]
             new_project['num_source_files'] = n[2]
@@ -99,3 +107,6 @@ if __name__ == "__main__":
             print(f"Project: {project}, ERROR: {e}")
 
     print("Done.")
+
+if __name__ == "__main__":
+    run_calculator()

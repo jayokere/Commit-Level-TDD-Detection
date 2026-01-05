@@ -1,4 +1,4 @@
-from db import (
+from database.db import (
     get_all_mined_project_names,
     get_java_projects_to_mine,
     get_python_projects_to_mine,

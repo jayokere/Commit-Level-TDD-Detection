@@ -14,8 +14,12 @@ venv/
 
 # Generated data files
 data/
+dump/
 
 # Visual Studio Code
 .vscode/
 
 pyrightconfig.json
+
+# Analysis Output
+analysis-output/

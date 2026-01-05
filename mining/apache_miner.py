@@ -12,9 +12,9 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 # Internal Utils
-import db
-import miner_intro 
-from utils import measure_time, ping_target
+from database import db
+from utilities import miner_intro 
+from utilities.utils import measure_time, ping_target
 
 try:
     from dotenv import load_dotenv
@@ -25,7 +25,8 @@ except ImportError:
 # Constants
 TARGET_ORG = "apache"
 TARGET_LANGUAGES = {"Java", "Python", "C++"}
-COLLECTION_NAME = "mined-repos"
+# UPDATED: Use the constant defined in db.py
+COLLECTION_NAME = db.APACHE_COLLECTION
 
 class RateLimitExceededError(Exception):
     pass
@@ -221,16 +222,32 @@ class ApacheGitHubMiner:
         if not candidates:
             return
 
-        print(f"🚀 Analysing and Storing {len(candidates)} repositories...")
+        # --- UPDATED: Filter using DB utils ---
+        print("🔍 Checking database for existing repositories...")
+        existing_urls = db.get_existing_repo_urls(COLLECTION_NAME)
+        
+        # Filter candidates that are NOT in the DB
+        # We compare candidate['url'] (from GitHub html_url) with stored repo_url
+        new_candidates = [c for c in candidates if c["url"] not in existing_urls]
+        skipped_count = len(candidates) - len(new_candidates)
+
+        if skipped_count > 0:
+            print(f"ℹ️  Skipping {skipped_count} repositories already in database.")
+        
+        if not new_candidates:
+            print("✅ All repositories are already up to date.")
+            return
+
+        print(f"🚀 Analysing and Storing {len(new_candidates)} new repositories...")
         print("") 
 
-        # 2. Process Mining
+        # 2. Process Mining (Only process new candidates)
         results = []
-        total = len(candidates)
+        total = len(new_candidates)
         miner_intro.update_progress(0, total, label="ANALYSING")
         
         with ThreadPool(self.num_threads) as pool:
-            for i, result in enumerate(pool.imap_unordered(self.process_repo, candidates)):
+            for i, result in enumerate(pool.imap_unordered(self.process_repo, new_candidates)):
                 if self._stop_event.is_set():
                     break
                 
@@ -248,6 +265,7 @@ class ApacheGitHubMiner:
 
         # 3. Save
         print(f"💾 Saving {len(results)} records to MongoDB...")
+        # db.save_repo_batch handles mapping 'url' -> 'repo_url' automatically
         db.save_repo_batch(results, COLLECTION_NAME)
         
         # 4. Breakdown

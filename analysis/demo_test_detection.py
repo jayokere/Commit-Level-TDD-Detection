@@ -5,8 +5,8 @@ Run this without any dependencies to see the algorithm in action.
 """
 
 from unittest.mock import MagicMock
-from repo_miner import Repo_miner
-from miners import TestAnalyser
+from mining.repo_miner import Repo_miner
+from mining.components import TestAnalyser
 
 
 def print_header(title):

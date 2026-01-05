@@ -1,5 +1,6 @@
 import os
 import sys
+from datetime import datetime
 from dotenv import load_dotenv, find_dotenv
 from pymongo import MongoClient, ASCENDING, DESCENDING, UpdateOne
 from pymongo.errors import PyMongoError, AutoReconnect, DocumentTooLarge
@@ -11,8 +12,12 @@ load_dotenv(find_dotenv())
 
 # Constants
 DB_NAME = "mined-data"
+APACHE_COLLECTION = "apache-repos"
 REPO_COLLECTION = "mined-repos"
 COMMIT_COLLECTION = "mined-commits"
+
+# Module-level, per-process Mongo client (reused across calls)
+_CLIENT = None
 
 # Module-level, per-process Mongo client (reused across calls)
 _CLIENT = None
@@ -38,12 +43,23 @@ def get_db_connection():
         
         if choice == "2":
             print("   -> Selected: Atlas Cloud")
-            # Clear any local override to force fallback to Cloud creds
-            if "MONGODB_CONNECTION_STRING" in os.environ:
-                del os.environ["MONGODB_CONNECTION_STRING"]
-        else:
+            # --- FIX: Construct and SET the Cloud URL here so workers inherit it ---
+            user = os.getenv('MONGODB_USER')
+            pwd = os.getenv('MONGODB_PWD')
+            if user and pwd:
+                cloud_url = f"mongodb+srv://{user}:{pwd}@mined-repos.gt9vypu.mongodb.net/?appName=Mined-Repos"
+                # Explicitly set this env var. Child processes will inherit it, 
+                # and load_dotenv will NOT overwrite it because it already exists.
+                os.environ["MONGODB_CONNECTION_STRING"] = cloud_url
+            else:
+                print("   [ERROR] Missing MONGODB_USER or MONGODB_PWD in .env")
+                sys.exit(1)
+        elif choice == "1":
             print("   -> Selected: Local Docker")
             # Set the env var so child processes know to use Local
+            os.environ["MONGODB_CONNECTION_STRING"] = "mongodb://localhost:27017/"
+        else:
+            print("   -> No valid selection made. Defaulting to Local Docker.")
             os.environ["MONGODB_CONNECTION_STRING"] = "mongodb://localhost:27017/"
             
         # Mark as done so we don't ask again
@@ -70,14 +86,15 @@ def get_db_connection():
                 raise ValueError("No MONGODB_CONNECTION_STRING or MONGODB_USER/PWD found in .env")
 
         if _CHOICE_MADE: 
-            print(f"[DB] Connecting to: {'Localhost' if 'localhost' in connection_string else 'Atlas Cloud'}...")
+            is_local = "localhost" in connection_string or "127.0.0.1" in connection_string
+            print(f"[DB] Connecting to: {'Localhost' if is_local else 'Atlas Cloud'}...")
         
         _CLIENT = MongoClient(
             connection_string,
             server_api=ServerApi('1'),
-            serverSelectionTimeoutMS=int(os.getenv('MONGO_SERVER_SELECTION_TIMEOUT_MS', '30000')),
-            connectTimeoutMS=int(os.getenv('MONGO_CONNECT_TIMEOUT_MS', '30000')),
-            socketTimeoutMS=int(os.getenv('MONGO_SOCKET_TIMEOUT_MS', '30000')),
+            serverSelectionTimeoutMS=int(os.getenv('MONGO_SERVER_SELECTION_TIMEOUT_MS', '300000')),
+            connectTimeoutMS=int(os.getenv('MONGO_CONNECT_TIMEOUT_MS', '300000')),
+            socketTimeoutMS=int(os.getenv('MONGO_SOCKET_TIMEOUT_MS', '300000')),
         )
 
     return _CLIENT[DB_NAME]
@@ -86,6 +103,30 @@ def get_collection(collection_name):
     """Generic helper to get a collection."""
     db = get_db_connection()
     return db[collection_name]
+
+# -------------------------------------------------------------------------
+# NEW: Status Management
+# -------------------------------------------------------------------------
+
+def get_completed_project_names():
+    """
+    Returns a set of project names that are explicitly marked as 'completed'.
+    Replaces get_all_mined_project_names for quota checking.
+    """
+    col = get_collection(REPO_COLLECTION)
+    # Only fetch projects where mining_status is 'completed'
+    cursor = col.find({"mining_status": "completed"}, {"name": 1, "_id": 0})
+    return {doc['name'] for doc in cursor}
+
+def mark_project_as_completed(project_name):
+    """
+    Marks a project as fully mined in the mined-repos collection.
+    """
+    col = get_collection(REPO_COLLECTION)
+    col.update_one(
+        {"name": project_name},
+        {"$set": {"mining_status": "completed", "last_mined": datetime.now()}}
+    )
 
 # -------------------------------------------------------------------------
 # Data Access Objects (DAO) - Repo Management

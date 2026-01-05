@@ -3,7 +3,7 @@ import pytest
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-import source_file_calculator as sfc
+import analysis.source_file_calculator as sfc
 
 
 def test_parse_github_url_valid():
@@ -131,6 +131,11 @@ def test_integration_main_update_project(monkeypatch):
     for project in sfc.get_all_mined_project_names():
         n = sfc.num_source_files(project)
         new_project = sfc.get_project(project)
+
+        if new_project is None:
+                print(f"Skipping {project}: Project details not found in DB.")
+                continue
+
         new_project['num_production_files'] = n[0]
         new_project['num_test_files'] = n[1]
         new_project['num_source_files'] = n[2]

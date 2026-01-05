@@ -4,7 +4,7 @@ Core commit processing utilities for traversing repositories and extracting metr
 
 from .file_analyser import FileAnalyser
 from .test_analyser import TestAnalyser
-from db import get_existing_commit_hashes, save_commit_batch
+from database.db import get_existing_commit_hashes, save_commit_batch
 
 
 class CommitProcessor:
@@ -19,7 +19,7 @@ class CommitProcessor:
         """
         self.batch_size = batch_size
     
-    def process_commits(self, repo_miner, project_name, repo_url):
+    def process_commits(self, repo_miner, project_name, repo_url, language=None):
         """
         Traverse commits in a repository and extract metrics.
         
@@ -27,6 +27,7 @@ class CommitProcessor:
             repo_miner (Repository): A PyDriller Repository object.
             project_name (str): Name of the project being mined.
             repo_url (str): URL of the repository.
+            language (str): The primary language of the project (e.g., 'Java', 'Python').
             
         Yields:
             tuple: (commit_info_dict, new_commits_count, existing_count)
@@ -37,6 +38,9 @@ class CommitProcessor:
         
         commits_buffer = []
         new_commits_mined = 0
+
+        # Determine valid extensions for this project's language
+        allowed_extensions = FileAnalyser.get_extensions_for_language(language)
         
         # Traverse the git history of the repository
         for commit in repo_miner.traverse_commits():
@@ -45,7 +49,10 @@ class CommitProcessor:
                 continue
             
             # Filter: Only keep relevant files (Source/Tests) based on criteria
-            relevant_files_objs = [f for f in commit.modified_files if FileAnalyser.is_valid_file(f)]
+            relevant_files_objs = [
+                f for f in commit.modified_files 
+                if FileAnalyser.is_valid_file(f, allowed_extensions=allowed_extensions)
+            ]
             
             if not relevant_files_objs:
                 continue
