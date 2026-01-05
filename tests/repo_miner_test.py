@@ -1,17 +1,18 @@
 import pytest
 from unittest.mock import MagicMock, patch, PropertyMock, ANY
-from datetime import datetime, timedelta
+from datetime import datetime
 import config
 
-# Modules to test
+# Imports
 from repo_miner import Repo_miner
 from worker import mine_repo, clean_url
-from partitioner import prepare_job
+import partitioner # Import module explicitly for patch.object
 
 # --- Fixtures ---
 
 @pytest.fixture
 def mock_db():
+    """Mocks the database functions to prevent real DB connections."""
     with patch('repo_miner.get_java_projects_to_mine') as mock_java, \
          patch('repo_miner.get_python_projects_to_mine') as mock_python, \
          patch('repo_miner.get_cpp_projects_to_mine') as mock_cpp, \
@@ -30,6 +31,7 @@ def mock_db():
         yield {
             'java': mock_java, 'python': mock_python, 'cpp': mock_cpp,
             'completed_names': mock_completed_names, 'mark_completed': mock_mark_completed,
+            'hashes': mock_hashes, # FIX: Added missing key here
             'save': mock_save
         }
 
@@ -62,8 +64,13 @@ def test_clean_url_correction():
 def test_mine_repo_success(mock_db, mock_pydriller, mock_file_analyser):
     """Test standard worker success path."""
     mock_commit = MagicMock()
-    mock_commit.hash, mock_commit.insertions = "hash123", 10
-    mock_commit.modified_files = []
+    mock_commit.hash = "hash123"
+    mock_commit.insertions = 10
+    mock_commit.deletions = 5
+    # FIX: Add a modified file so CommitProcessor doesn't skip it
+    mock_file = MagicMock()
+    mock_file.filename = "A.java"
+    mock_commit.modified_files = [mock_file]
     
     mock_pydriller.return_value.traverse_commits.return_value = [mock_commit]
     
@@ -74,8 +81,7 @@ def test_mine_repo_success(mock_db, mock_pydriller, mock_file_analyser):
     args = ("test", "url", datetime(2023,1,1), datetime(2024,1,1), "Java", 0, stop_event)
     result = mine_repo(args)
 
-    # FIX: Guard assertion to satisfy Pylance
-    assert result is not None 
+    assert result is not None
     assert result[1] == 1  # 1 new commit
     assert result[3] is None # No error
 
@@ -85,7 +91,7 @@ def test_mine_repo_skips_existing_commits(mock_db, mock_pydriller, mock_file_ana
     
     mock_commit = MagicMock()
     mock_commit.hash = "hash123"
-    mock_commit.modified_files = [] 
+    mock_commit.modified_files = [MagicMock(filename="A.java")]
     
     mock_pydriller.return_value.traverse_commits.return_value = [mock_commit]
     
@@ -95,7 +101,6 @@ def test_mine_repo_skips_existing_commits(mock_db, mock_pydriller, mock_file_ana
     args = ("test-project", "http://github.com/test", None, None, "Java", 0, stop_event)
     result = mine_repo(args)
     
-    # FIX: Guard assertion
     assert result is not None
     assert result[1] == 0 
     mock_db['save'].assert_not_called()
@@ -110,7 +115,6 @@ def test_mine_repo_handles_error(mock_db, mock_pydriller):
     args = ("test-project", "http://github.com/test", None, None, "Java", 0, stop_event)
     result = mine_repo(args)
     
-    # FIX: Guard assertion
     assert result is not None
     assert result[3] == "Git Error"
 
@@ -120,7 +124,6 @@ def test_stop_signal_check():
     stop_event.is_set.return_value = True
     args = ("test", "url", None, None, "Java", 0, stop_event)
     result = mine_repo(args)
-    
     assert result is None
 
 # --- 2. Scheduler Logic Tests ---
@@ -128,32 +131,30 @@ def test_stop_signal_check():
 def test_scheduler_prepare_job_java():
     """Test simple Java job creation (no date splitting, depth=0)."""
     project = {'name': 'J', 'repo_url': 'http://u', 'language': 'Java'}
-    jobs = prepare_job(project)
+    jobs = partitioner.prepare_job(project)
     
     assert len(jobs) == 1
-    # Check tuple: (name, url, start, end, lang, DEPTH)
     assert jobs[0] == ('J', 'http://u', None, None, 'Java', 0)
 
-@patch('scheduler.requests.get')
-def test_scheduler_prepare_job_cpp_api_success(mock_get):
+def test_scheduler_prepare_job_cpp_api_success():
     """Test C++ splitting with successful GitHub API date fetch."""
     project = {'name': 'C', 'repo_url': 'https://github.com/o/r', 'language': 'C++'}
     
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = {"created_at": "2022-01-01T00:00:00Z"}
-    mock_get.return_value = mock_response
-    
-    with patch('scheduler.datetime') as mock_datetime:
-        mock_datetime.now.return_value = datetime(2024, 1, 1)
-        mock_datetime.strptime = datetime.strptime 
+    # FIX: Use patch.object to avoid ModuleNotFoundError on import resolution
+    with patch.object(partitioner.requests, 'get') as mock_get:
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"created_at": "2020-01-01T00:00:00Z"}
+        mock_get.return_value = mock_response
         
-        jobs = prepare_job(project)
+        # We rely on the real datetime.now(). Since created_at is 2020, 
+        # and now is > 2020, it should generate multiple yearly shards.
+        jobs = partitioner.prepare_job(project)
 
-    assert len(jobs) >= 2 
-    assert jobs[0][4] == 'C++'
-    assert jobs[0][5] == 0 # Initial depth must be 0
-    assert jobs[0][2] == datetime(2022, 1, 1)
+        assert len(jobs) > 1 
+        assert jobs[0][4] == 'C++'
+        assert jobs[0][5] == 0 # Initial depth must be 0
+        assert jobs[0][2] == datetime(2020, 1, 1)
 
 # --- 3. Orchestrator Logic Tests (Split & Retry) ---
 
@@ -162,8 +163,12 @@ def test_run_logic_splits_on_timeout(mock_db, mock_executor):
     CRITICAL TEST: Verifies that after 2 timeouts, the miner splits the job
     and increments the depth.
     """
+    # 1. SETUP: Ensure we have at least one project
+    mock_db['cpp'].return_value = [{'name': 'repo1', 'url': 'url', 'language': 'C++'}]
+    
     job_initial = ('repo1', 'url', datetime(2020,1,1), datetime(2021,1,1), 'C++', 0)
     
+    # 2. SETUP: Mock Execution Results
     f_initial = MagicMock()
     f_retry1 = MagicMock()
     f_split_subtask = MagicMock()
@@ -172,26 +177,37 @@ def test_run_logic_splits_on_timeout(mock_db, mock_executor):
     f_retry1.result.return_value  = ('repo1', 0, 0, "TIMED OUT") 
     f_split_subtask.result.return_value = ('repo1', 5, 0, None)
 
-    mock_executor.submit.side_effect = [
-        f_initial,       # 1. Initial submission
-        f_retry1,        # 2. First retry submission
-        *[f_split_subtask] * 12 # 3. Split submissions
-    ]
+    # Sequence: 1. Initial (fail) -> 2. Retry (fail) -> 3...14 Split (success)
+    mock_executor.submit.side_effect = [f_initial, f_retry1] + [f_split_subtask] * 12
     
     def side_effect_wait(futures, return_when):
         f = list(futures)[0]
         return {f}, set()
 
     with patch('repo_miner.wait', side_effect=side_effect_wait), \
+         patch('repo_miner.as_completed') as mock_as_completed, \
          patch('repo_miner.prepare_job', return_value=[job_initial]), \
-         patch('repo_miner.ThreadPoolExecutor'): 
+         patch('repo_miner.ThreadPoolExecutor') as mock_thread_pool:
+         
+        # Mock Phase 1
+        mock_prep_future = MagicMock()
+        mock_prep_future.result.return_value = [job_initial]
+        mock_thread_pool.return_value.__enter__.return_value.submit.return_value = mock_prep_future
+        mock_as_completed.return_value = iter([mock_prep_future])
         
         miner = Repo_miner()
         miner.run()
 
-        # Check Depth increment on split
+        # 4. ASSERTIONS
+        assert mock_executor.submit.call_count == 14
+        
+        # Check Depth increment on split (The 3rd call is the first split shard)
+        # Structure of submit args: (function_obj, (arg_tuple))
         args_split = mock_executor.submit.call_args_list[2][0]
-        assert args_split[5] == 1 
+        
+        # Access the Worker Argument Tuple (index 1), then Depth (index 5)
+        worker_args = args_split[1]
+        assert worker_args[5] == 1
 
 def test_run_logic_stops_splitting_at_max_depth(mock_db, mock_executor):
     """
@@ -214,7 +230,9 @@ def test_run_logic_stops_splitting_at_max_depth(mock_db, mock_executor):
         miner = Repo_miner()
         miner.run()
         
+        # Verify no job was ever submitted with depth 4
         for call in mock_executor.submit.call_args_list:
             args = call[0]
+            # (name, url, start, end, lang, DEPTH, stop_event)
             depth_arg = args[5]
-            assert depth_arg == 3 # Should never increment to 4
+            assert depth_arg == 3
