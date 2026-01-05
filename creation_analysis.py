@@ -241,7 +241,7 @@ class creation_analysis(Static_Analysis):
                     paired_by_name=totals.paired_by_name + pc.paired_by_name,
                 )
                 
-                self._print_progress(completed_count, len(projects), pc)
+                self._print_creation_progress(completed_count, len(projects), pc)
 
         self._write_auditable_txt(
             totals=totals,
@@ -436,25 +436,23 @@ class creation_analysis(Static_Analysis):
 
     def _methods_indicate_relation(
         self,
-        test_filename: str,
-        test_methods: List[str],
-        source_filename: str,
-        source_methods: List[str],
+        test_f: str,
+        test_m: List[str],
+        source_f: str,
+        source_m: List[str],
     ) -> bool:
         """
         Heuristic method-level matching using changed_methods lists.
-
-        Returns True if there is meaningful token overlap between test method names and
-        source method names, or if test method names strongly reference the source file basename.
         """
-        if not test_methods or not source_methods:
+        # Renamed params to match base class: test_f, test_m, source_f, source_m
+        if not test_m or not source_m:
             return False
 
-        test_tokens = self._method_tokens(test_methods)
+        test_tokens = self._method_tokens(test_m)
         if not test_tokens:
             return False
 
-        source_tokens = self._method_tokens(source_methods)
+        source_tokens = self._method_tokens(source_m)
         if not source_tokens:
             return False
 
@@ -463,14 +461,13 @@ class creation_analysis(Static_Analysis):
             return True
 
         # Secondary signal: test tokens reference the source basename tokens
-        source_base_tokens = self._basename_tokens(source_filename)
+        source_base_tokens = self._basename_tokens(source_f)
         if source_base_tokens and test_tokens.intersection(source_base_tokens):
             return True
 
-        # Also allow direct "test_<sourceMethod>" style where full source method name appears
-        # after stripping common prefixes from test method names.
-        normalized_test_methods = [self._normalize_test_method_name(m) for m in test_methods]
-        source_method_set = set(self._normalize_method_name(m) for m in source_methods)
+        # Also allow direct "test_<sourceMethod>" style...
+        normalized_test_methods = [self._normalize_test_method_name(m) for m in test_m]
+        source_method_set = set(self._normalize_method_name(m) for m in source_m)
         for tm in normalized_test_methods:
             if tm in source_method_set:
                 return True
@@ -491,12 +488,12 @@ class creation_analysis(Static_Analysis):
                 break
         return n.strip("_")
 
-    def _method_tokens(self, method_names: List[str]) -> Set[str]:
+    def _method_tokens(self, methods: List[str]) -> Set[str]:
         """
         Tokenize method names into a set of significant tokens.
         """
         tokens: Set[str] = set()
-        for m in method_names:
+        for m in methods:
             for t in self._split_identifier(m):
                 t = t.lower()
                 if self._is_generic_token(t):
@@ -606,7 +603,7 @@ class creation_analysis(Static_Analysis):
     # Progress + output
     # ----------------------------
 
-    def _print_progress(self, idx: int, total: int, pc: ProjectCounts) -> None:
+    def _print_creation_progress(self, idx: int, total: int, pc: ProjectCounts) -> None:
         msg = (
             f"\r[{idx}/{total}] {pc.project} -> "
             f"paired={pc.paired} before={pc.before} same={pc.same} after={pc.after} "
