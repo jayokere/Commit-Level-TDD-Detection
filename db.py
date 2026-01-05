@@ -92,9 +92,9 @@ def get_db_connection():
         _CLIENT = MongoClient(
             connection_string,
             server_api=ServerApi('1'),
-            serverSelectionTimeoutMS=int(os.getenv('MONGO_SERVER_SELECTION_TIMEOUT_MS', '30000')),
-            connectTimeoutMS=int(os.getenv('MONGO_CONNECT_TIMEOUT_MS', '30000')),
-            socketTimeoutMS=int(os.getenv('MONGO_SOCKET_TIMEOUT_MS', '30000')),
+            serverSelectionTimeoutMS=int(os.getenv('MONGO_SERVER_SELECTION_TIMEOUT_MS', '300000')),
+            connectTimeoutMS=int(os.getenv('MONGO_CONNECT_TIMEOUT_MS', '300000')),
+            socketTimeoutMS=int(os.getenv('MONGO_SOCKET_TIMEOUT_MS', '300000')),
         )
 
     return _CLIENT[DB_NAME]
